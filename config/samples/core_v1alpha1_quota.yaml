@@ -1,0 +1,133 @@
+apiVersion: core.korder.dev/v1alpha1
+kind: Quota
+metadata:
+  labels:
+    app.kubernetes.io/name: korder
+    app.kubernetes.io/managed-by: kustomize
+  name: cluster-quota-sample
+spec:
+  # Cluster-wide quota
+  scope:
+    type: Cluster
+  
+  # Resource limits
+  hard:
+    orders: "100"                # Max 100 orders
+    tickets: "1000"              # Max 1000 tickets
+    reserved.cpu: "1000"         # Max 1000 CPU cores reserved
+    reserved.memory: "2000Gi"    # Max 2000Gi memory reserved
+    max-duration: "604800"       # Max 7 days duration (in seconds)
+---
+apiVersion: core.korder.dev/v1alpha1
+kind: Quota
+metadata:
+  labels:
+    app.kubernetes.io/name: korder
+    app.kubernetes.io/managed-by: kustomize
+  name: namespace-quota-sample
+spec:
+  # Namespace-specific quota
+  scope:
+    type: NamespaceList
+    namespaces:
+    - development
+    - staging
+    - production
+  
+  # Base resource limits
+  hard:
+    orders: "50"
+    tickets: "500"
+    reserved.cpu: "200"
+    reserved.memory: "400Gi"
+    max-duration: "86400"        # Max 24 hours duration
+  
+  # Hierarchical allocation per namespace
+  allocation:
+  - namespace: production
+    limits:
+      reserved.cpu: "120"        # 60% for production
+      reserved.memory: "240Gi"
+  - namespace: staging
+    limits:
+      reserved.cpu: "50"         # 25% for staging  
+      reserved.memory: "100Gi"
+  - namespace: development
+    limits:
+      reserved.cpu: "30"         # 15% for development
+      reserved.memory: "60Gi"
+---
+apiVersion: core.korder.dev/v1alpha1
+kind: Quota
+metadata:
+  labels:
+    app.kubernetes.io/name: korder
+    app.kubernetes.io/managed-by: kustomize
+  name: team-quota-sample
+spec:
+  # Team-based quota using namespace selector
+  scope:
+    type: NamespaceSelector
+    namespaceSelector:
+      matchLabels:
+        team: backend-team
+  
+  # Team resource limits
+  hard:
+    orders: "20"
+    tickets: "200"
+    reserved.cpu: "100"
+    reserved.memory: "200Gi"
+    max-duration: "172800"       # Max 48 hours duration
+---
+apiVersion: core.korder.dev/v1alpha1
+kind: Quota
+metadata:
+  labels:
+    app.kubernetes.io/name: korder
+    app.kubernetes.io/managed-by: kustomize
+  name: time-based-quota-sample
+spec:
+  # Cluster quota with time-based multipliers
+  scope:
+    type: Cluster
+  
+  # Base limits
+  hard:
+    reserved.cpu: "500"
+    reserved.memory: "1000Gi"
+  
+  # Time windows with different resource multipliers
+  timeWindows:
+  - name: business-hours
+    schedule: "0 9-17 * * 1-5"   # Mon-Fri 9AM-5PM
+    multiplier: "2.0"            # Allow 2x resources during business hours
+  - name: off-hours
+    schedule: "0 18-8 * * *"     # Evenings and weekends  
+    multiplier: "0.5"            # Limit to 50% during off-hours
+  - name: maintenance-window
+    schedule: "0 2-4 * * 0"      # Sunday 2-4 AM
+    multiplier: "0.1"            # Very limited during maintenance
+---
+apiVersion: core.korder.dev/v1alpha1
+kind: Quota
+metadata:
+  labels:
+    app.kubernetes.io/name: korder
+    app.kubernetes.io/managed-by: kustomize
+  name: object-selector-quota-sample
+spec:
+  # Object selector quota for specific workloads
+  scope:
+    type: ObjectSelector
+    objectSelector:
+      matchLabels:
+        workload-type: ml-training
+  
+  # ML workload specific limits
+  hard:
+    orders: "10"
+    tickets: "50"
+    reserved.cpu: "400"          # High CPU for ML workloads
+    reserved.memory: "800Gi"     # High memory for ML workloads
+    max-duration: "43200"        # Max 12 hours for training jobs

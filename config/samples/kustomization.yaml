@@ -2,4 +2,5 @@
 resources:
 - core_v1alpha1_order.yaml
 - core_v1alpha1_ticket.yaml
+- core_v1alpha1_quota.yaml
 # +kubebuilder:scaffold:manifestskustomizesamples

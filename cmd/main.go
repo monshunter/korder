@@ -39,6 +39,8 @@ import (
 
 	corev1alpha1 "github.com/monshunter/korder/api/v1alpha1"
 	"github.com/monshunter/korder/internal/controller"
+	"github.com/monshunter/korder/internal/metrics"
+	"github.com/monshunter/korder/internal/scheduler"
 	webhookv1 "github.com/monshunter/korder/internal/webhook/v1"
 	webhookv1alpha1 "github.com/monshunter/korder/internal/webhook/v1alpha1"
 	// +kubebuilder:scaffold:imports
@@ -54,6 +56,9 @@ func init() {
 
 	utilruntime.Must(corev1alpha1.AddToScheme(scheme))
 	// +kubebuilder:scaffold:scheme
+
+	// Register custom metrics
+	metrics.RegisterMetrics()
 }
 
 // nolint:gocyclo
@@ -205,8 +210,9 @@ func main() {
 	}
 
 	if err := (&controller.OrderReconciler{
-		Client: mgr.GetClient(),
-		Scheme: mgr.GetScheme(),
+		Client:        mgr.GetClient(),
+		Scheme:        mgr.GetScheme(),
+		CronScheduler: scheduler.NewCronScheduler(),
 	}).SetupWithManager(mgr); err != nil {
 		setupLog.Error(err, "unable to create controller", "controller", "Order")
 		os.Exit(1)
@@ -236,6 +242,20 @@ func main() {
 	if os.Getenv("ENABLE_WEBHOOKS") != "false" {
 		if err := webhookv1.SetupPodWebhookWithManager(mgr); err != nil {
 			setupLog.Error(err, "unable to create webhook", "webhook", "Pod")
+			os.Exit(1)
+		}
+	}
+	if err := (&controller.QuotaReconciler{
+		Client: mgr.GetClient(),
+		Scheme: mgr.GetScheme(),
+	}).SetupWithManager(mgr); err != nil {
+		setupLog.Error(err, "unable to create controller", "controller", "Quota")
+		os.Exit(1)
+	}
+	// nolint:goconst
+	if os.Getenv("ENABLE_WEBHOOKS") != "false" {
+		if err := webhookv1alpha1.SetupQuotaWebhookWithManager(mgr); err != nil {
+			setupLog.Error(err, "unable to create webhook", "webhook", "Quota")
 			os.Exit(1)
 		}
 	}

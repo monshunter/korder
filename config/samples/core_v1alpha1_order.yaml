@@ -5,5 +5,122 @@ metadata:
     app.kubernetes.io/name: korder
     app.kubernetes.io/managed-by: kustomize
   name: order-sample
+  namespace: default
 spec:
-  # TODO(user): Add fields here
+  # Number of tickets to create
+  replicas: 3
+  
+  # Order strategy
+  strategy:
+    type: OneTime
+    refreshPolicy: OnClaim
+  
+  # Ticket template
+  template:
+    metadata:
+      labels:
+        app: my-application
+        tier: backend
+    spec:
+      # Ticket duration
+      duration: 24h
+      
+      # Resource requirements
+      resources:
+        requests:
+          cpu: 500m
+          memory: 1Gi
+        limits:
+          cpu: 1000m
+          memory: 2Gi
+      
+      # Scheduling preferences
+      schedulerName: default-scheduler
+      priorityClassName: high-priority
+      
+      # Node selection
+      nodeSelector:
+        node-type: compute
+      
+      # Tolerations for tainted nodes
+      tolerations:
+      - key: dedicated
+        operator: Equal
+        value: gpu
+        effect: NoSchedule
+      
+      # Lifecycle policies
+      lifecycle:
+        ttlSecondsAfterFinished: 3600  # 1 hour
+        cleanupPolicy: Delete
+---
+apiVersion: core.korder.dev/v1alpha1
+kind: Order
+metadata:
+  labels:
+    app.kubernetes.io/name: korder
+    app.kubernetes.io/managed-by: kustomize
+  name: scheduled-order-sample
+  namespace: default
+spec:
+  replicas: 2
+  
+  # Scheduled strategy - runs every day at 2:00 AM
+  strategy:
+    type: Scheduled
+    schedule: "0 2 * * *"  # Cron: minute hour day month weekday
+    refreshPolicy: Always
+  
+  template:
+    metadata:
+      labels:
+        app: scheduled-job
+        schedule: daily
+    spec:
+      duration: 8h  # 8 hour window
+      
+      resources:
+        requests:
+          cpu: 200m
+          memory: 512Mi
+      
+      lifecycle:
+        ttlSecondsAfterFinished: 7200  # 2 hours
+        cleanupPolicy: Delete
+---
+apiVersion: core.korder.dev/v1alpha1
+kind: Order
+metadata:
+  labels:
+    app.kubernetes.io/name: korder
+    app.kubernetes.io/managed-by: kustomize
+  name: recurring-order-sample
+  namespace: default
+spec:
+  replicas: 5
+  
+  # Recurring strategy - runs every 15 minutes during business hours
+  strategy:
+    type: Recurring
+    schedule: "*/15 9-17 * * 1-5"  # Every 15 minutes, 9-5 PM, Mon-Fri
+    refreshPolicy: OnClaim
+  
+  template:
+    metadata:
+      labels:
+        app: recurring-service
+        pattern: business-hours
+    spec:
+      duration: 30m  # 30 minute windows
+      
+      resources:
+        requests:
+          cpu: 100m
+          memory: 256Mi
+      
+      nodeSelector:
+        workload-type: standard
+      
+      lifecycle:
+        ttlSecondsAfterFinished: 1800  # 30 minutes
+        cleanupPolicy: Retain

@@ -50,6 +50,26 @@ webhooks:
     service:
       name: webhook-service
       namespace: system
+      path: /mutate-core-korder-dev-v1alpha1-quota
+  failurePolicy: Fail
+  name: mquota-v1alpha1.kb.io
+  rules:
+  - apiGroups:
+    - core.korder.dev
+    apiVersions:
+    - v1alpha1
+    operations:
+    - CREATE
+    - UPDATE
+    resources:
+    - quotas
+  sideEffects: None
+- admissionReviewVersions:
+  - v1
+  clientConfig:
+    service:
+      name: webhook-service
+      namespace: system
       path: /mutate-core-korder-dev-v1alpha1-ticket
   failurePolicy: Fail
   name: mticket-v1alpha1.kb.io
@@ -109,6 +129,26 @@ webhooks:
     - UPDATE
     resources:
     - orders
+  sideEffects: None
+- admissionReviewVersions:
+  - v1
+  clientConfig:
+    service:
+      name: webhook-service
+      namespace: system
+      path: /validate-core-korder-dev-v1alpha1-quota
+  failurePolicy: Fail
+  name: vquota-v1alpha1.kb.io
+  rules:
+  - apiGroups:
+    - core.korder.dev
+    apiVersions:
+    - v1alpha1
+    operations:
+    - CREATE
+    - UPDATE
+    resources:
+    - quotas
   sideEffects: None
 - admissionReviewVersions:
   - v1

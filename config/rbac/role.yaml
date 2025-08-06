@@ -5,9 +5,37 @@ metadata:
   name: manager-role
 rules:
 - apiGroups:
+  - ""
+  resources:
+  - events
+  verbs:
+  - create
+  - patch
+- apiGroups:
+  - ""
+  resources:
+  - namespaces
+  verbs:
+  - get
+  - list
+  - watch
+- apiGroups:
+  - ""
+  resources:
+  - pods
+  verbs:
+  - create
+  - delete
+  - get
+  - list
+  - patch
+  - update
+  - watch
+- apiGroups:
   - core.korder.dev
   resources:
   - orders
+  - quotas
   - tickets
   verbs:
   - create
@@ -21,6 +49,7 @@ rules:
   - core.korder.dev
   resources:
   - orders/finalizers
+  - quotas/finalizers
   - tickets/finalizers
   verbs:
   - update
@@ -28,6 +57,7 @@ rules:
   - core.korder.dev
   resources:
   - orders/status
+  - quotas/status
   - tickets/status
   verbs:
   - get

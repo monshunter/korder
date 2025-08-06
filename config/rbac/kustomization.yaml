@@ -22,6 +22,9 @@ resources:
 # default, aiding admins in cluster management. Those roles are
 # not used by the korder itself. You can comment the following lines
 # if you do not want those helpers be installed with your Project.
+- quota_admin_role.yaml
+- quota_editor_role.yaml
+- quota_viewer_role.yaml
 - ticket_admin_role.yaml
 - ticket_editor_role.yaml
 - ticket_viewer_role.yaml

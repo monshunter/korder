@@ -1,0 +1,278 @@
+---
+apiVersion: apiextensions.k8s.io/v1
+kind: CustomResourceDefinition
+metadata:
+  annotations:
+    controller-gen.kubebuilder.io/version: v0.18.0
+  name: quotas.core.korder.dev
+spec:
+  group: core.korder.dev
+  names:
+    kind: Quota
+    listKind: QuotaList
+    plural: quotas
+    singular: quota
+  scope: Cluster
+  versions:
+  - name: v1alpha1
+    schema:
+      openAPIV3Schema:
+        description: Quota is the Schema for the quotas API
+        properties:
+          apiVersion:
+            description: |-
+              APIVersion defines the versioned schema of this representation of an object.
+              Servers should convert recognized schemas to the latest internal value, and
+              may reject unrecognized values.
+              More info: https://git.k8s.io/community/contributors/devel/sig-architecture/api-conventions.md#resources
+            type: string
+          kind:
+            description: |-
+              Kind is a string value representing the REST resource this object represents.
+              Servers may infer this from the endpoint the client submits requests to.
+              Cannot be updated.
+              In CamelCase.
+              More info: https://git.k8s.io/community/contributors/devel/sig-architecture/api-conventions.md#types-kinds
+            type: string
+          metadata:
+            type: object
+          spec:
+            description: spec defines the desired state of Quota
+            properties:
+              allocation:
+                description: Allocation defines per-namespace resource allocation
+                items:
+                  description: QuotaAllocation defines resource allocation for specific
+                    namespaces
+                  properties:
+                    limits:
+                      additionalProperties:
+                        anyOf:
+                        - type: integer
+                        - type: string
+                        pattern: ^(\+|-)?(([0-9]+(\.[0-9]*)?)|(\.[0-9]+))(([KMGTPE]i)|[numkMGTPE]|([eE](\+|-)?(([0-9]+(\.[0-9]*)?)|(\.[0-9]+))))?$
+                        x-kubernetes-int-or-string: true
+                      description: Limits defines the resource limits for this namespace
+                      type: object
+                    namespace:
+                      description: Namespace to allocate resources to
+                      type: string
+                  required:
+                  - limits
+                  - namespace
+                  type: object
+                type: array
+              hard:
+                additionalProperties:
+                  anyOf:
+                  - type: integer
+                  - type: string
+                  pattern: ^(\+|-)?(([0-9]+(\.[0-9]*)?)|(\.[0-9]+))(([KMGTPE]i)|[numkMGTPE]|([eE](\+|-)?(([0-9]+(\.[0-9]*)?)|(\.[0-9]+))))?$
+                  x-kubernetes-int-or-string: true
+                description: Hard defines the maximum resource limits
+                type: object
+              scope:
+                description: Scope defines what this quota applies to
+                properties:
+                  namespaceSelector:
+                    description: NamespaceSelector selects namespaces when type is
+                      NamespaceSelector
+                    properties:
+                      matchExpressions:
+                        description: matchExpressions is a list of label selector
+                          requirements. The requirements are ANDed.
+                        items:
+                          description: |-
+                            A label selector requirement is a selector that contains values, a key, and an operator that
+                            relates the key and values.
+                          properties:
+                            key:
+                              description: key is the label key that the selector
+                                applies to.
+                              type: string
+                            operator:
+                              description: |-
+                                operator represents a key's relationship to a set of values.
+                                Valid operators are In, NotIn, Exists and DoesNotExist.
+                              type: string
+                            values:
+                              description: |-
+                                values is an array of string values. If the operator is In or NotIn,
+                                the values array must be non-empty. If the operator is Exists or DoesNotExist,
+                                the values array must be empty. This array is replaced during a strategic
+                                merge patch.
+                              items:
+                                type: string
+                              type: array
+                              x-kubernetes-list-type: atomic
+                          required:
+                          - key
+                          - operator
+                          type: object
+                        type: array
+                        x-kubernetes-list-type: atomic
+                      matchLabels:
+                        additionalProperties:
+                          type: string
+                        description: |-
+                          matchLabels is a map of {key,value} pairs. A single {key,value} in the matchLabels
+                          map is equivalent to an element of matchExpressions, whose key field is "key", the
+                          operator is "In", and the values array contains only "value". The requirements are ANDed.
+                        type: object
+                    type: object
+                    x-kubernetes-map-type: atomic
+                  namespaces:
+                    description: Namespaces lists explicit namespaces when type is
+                      NamespaceList
+                    items:
+                      type: string
+                    type: array
+                  objectSelector:
+                    description: ObjectSelector selects objects when type is ObjectSelector
+                    properties:
+                      matchExpressions:
+                        description: matchExpressions is a list of label selector
+                          requirements. The requirements are ANDed.
+                        items:
+                          description: |-
+                            A label selector requirement is a selector that contains values, a key, and an operator that
+                            relates the key and values.
+                          properties:
+                            key:
+                              description: key is the label key that the selector
+                                applies to.
+                              type: string
+                            operator:
+                              description: |-
+                                operator represents a key's relationship to a set of values.
+                                Valid operators are In, NotIn, Exists and DoesNotExist.
+                              type: string
+                            values:
+                              description: |-
+                                values is an array of string values. If the operator is In or NotIn,
+                                the values array must be non-empty. If the operator is Exists or DoesNotExist,
+                                the values array must be empty. This array is replaced during a strategic
+                                merge patch.
+                              items:
+                                type: string
+                              type: array
+                              x-kubernetes-list-type: atomic
+                          required:
+                          - key
+                          - operator
+                          type: object
+                        type: array
+                        x-kubernetes-list-type: atomic
+                      matchLabels:
+                        additionalProperties:
+                          type: string
+                        description: |-
+                          matchLabels is a map of {key,value} pairs. A single {key,value} in the matchLabels
+                          map is equivalent to an element of matchExpressions, whose key field is "key", the
+                          operator is "In", and the values array contains only "value". The requirements are ANDed.
+                        type: object
+                    type: object
+                    x-kubernetes-map-type: atomic
+                  type:
+                    description: Type defines the scope type
+                    enum:
+                    - Cluster
+                    - NamespaceSelector
+                    - NamespaceList
+                    - ObjectSelector
+                    type: string
+                required:
+                - type
+                type: object
+              timeWindows:
+                description: TimeWindows defines time-based quota adjustments
+                items:
+                  description: TimeWindow defines time-based quota limits
+                  properties:
+                    multiplier:
+                      description: Multiplier to apply to base quotas during this
+                        window (as string to avoid float)
+                      type: string
+                    name:
+                      description: Name of the time window
+                      type: string
+                    schedule:
+                      description: Schedule defines when this window applies (cron
+                        format)
+                      type: string
+                  required:
+                  - multiplier
+                  - name
+                  - schedule
+                  type: object
+                type: array
+            required:
+            - hard
+            - scope
+            type: object
+          status:
+            description: status defines the observed state of Quota
+            properties:
+              activeTimeWindow:
+                description: ActiveTimeWindow indicates which time window is currently
+                  active
+                type: string
+              conditions:
+                description: Conditions represent the latest available observations
+                  of the quota's current state
+                items:
+                  description: QuotaCondition describes the state of a quota at a
+                    certain point
+                  properties:
+                    lastTransitionTime:
+                      description: Last time the condition transitioned
+                      format: date-time
+                      type: string
+                    message:
+                      description: Message providing details about the condition
+                      type: string
+                    reason:
+                      description: Reason for the condition's last transition
+                      type: string
+                    status:
+                      description: Status of the condition
+                      type: string
+                    type:
+                      description: Type of quota condition
+                      type: string
+                  required:
+                  - status
+                  - type
+                  type: object
+                type: array
+              hard:
+                additionalProperties:
+                  anyOf:
+                  - type: integer
+                  - type: string
+                  pattern: ^(\+|-)?(([0-9]+(\.[0-9]*)?)|(\.[0-9]+))(([KMGTPE]i)|[numkMGTPE]|([eE](\+|-)?(([0-9]+(\.[0-9]*)?)|(\.[0-9]+))))?$
+                  x-kubernetes-int-or-string: true
+                description: Hard defines the maximum resource limits currently enforced
+                type: object
+              observedGeneration:
+                description: ObservedGeneration reflects the generation of the most
+                  recently observed Quota
+                format: int64
+                type: integer
+              used:
+                additionalProperties:
+                  anyOf:
+                  - type: integer
+                  - type: string
+                  pattern: ^(\+|-)?(([0-9]+(\.[0-9]*)?)|(\.[0-9]+))(([KMGTPE]i)|[numkMGTPE]|([eE](\+|-)?(([0-9]+(\.[0-9]*)?)|(\.[0-9]+))))?$
+                  x-kubernetes-int-or-string: true
+                description: Used defines the current resource usage
+                type: object
+            type: object
+        required:
+        - spec
+        type: object
+    served: true
+    storage: true
+    subresources:
+      status: {}

@@ -17,28 +17,153 @@ limitations under the License.
 package v1alpha1
 
 import (
+	corev1 "k8s.io/api/core/v1"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 )
 
-// EDIT THIS FILE!  THIS IS SCAFFOLDING FOR YOU TO OWN!
-// NOTE: json tags are required.  Any new fields you add must have json tags for the fields to be serialized.
+// TicketPhase defines the phase of a ticket
+type TicketPhase string
+
+const (
+	// TicketPending means the ticket is waiting to be activated
+	TicketPending TicketPhase = "Pending"
+	// TicketReserved means the ticket is reserved and guardian pod is running
+	TicketReserved TicketPhase = "Reserved"
+	// TicketClaimed means the ticket is claimed by a business pod
+	TicketClaimed TicketPhase = "Claimed"
+	// TicketExpired means the ticket has expired
+	TicketExpired TicketPhase = "Expired"
+)
 
 // TicketSpec defines the desired state of Ticket
 type TicketSpec struct {
-	// INSERT ADDITIONAL SPEC FIELDS - desired state of cluster
-	// Important: Run "make" to regenerate code after modifying this file
-	// The following markers will use OpenAPI v3 schema to validate the value
-	// More info: https://book.kubebuilder.io/reference/markers/crd-validation.html
-
-	// foo is an example field of Ticket. Edit ticket_types.go to remove/update
+	// Lifecycle defines lifecycle policies
 	// +optional
-	Foo *string `json:"foo,omitempty"`
+	Lifecycle *TicketLifecycle `json:"lifecycle,omitempty"`
+
+	// StartTime defines when the ticket becomes active
+	// Format: RFC3339
+	// +optional
+	StartTime *metav1.Time `json:"startTime,omitempty"`
+
+	// Duration defines how long the ticket is valid
+	Duration *metav1.Duration `json:"duration,omitempty"`
+
+	// SchedulerName defines which scheduler to use
+	// +optional
+	SchedulerName *string `json:"schedulerName,omitempty"`
+
+	// PriorityClassName for the guardian pods
+	// +optional
+	PriorityClassName *string `json:"priorityClassName,omitempty"`
+
+	// Resources required for this ticket
+	// +optional
+	Resources *corev1.ResourceRequirements `json:"resources,omitempty"`
+
+	// NodeName assigns the ticket to a specific node
+	// +optional
+	NodeName *string `json:"nodeName,omitempty"`
+
+	// NodeSelector constrains the ticket to nodes with matching labels
+	// +optional
+	NodeSelector map[string]string `json:"nodeSelector,omitempty"`
+
+	// Affinity defines scheduling constraints
+	// +optional
+	Affinity *corev1.Affinity `json:"affinity,omitempty"`
+
+	// Tolerations for the guardian pods
+	// +optional
+	Tolerations []corev1.Toleration `json:"tolerations,omitempty"`
+
+	// TopologySpreadConstraints for the guardian pods
+	// +optional
+	TopologySpreadConstraints []corev1.TopologySpreadConstraint `json:"topologySpreadConstraints,omitempty"`
 }
 
-// TicketStatus defines the observed state of Ticket.
+// TicketConditionType defines the type of ticket condition
+type TicketConditionType string
+
+const (
+	// TicketReady indicates the ticket is ready
+	TicketReady TicketConditionType = "Ready"
+	// TicketGuardianReady indicates the guardian pod is ready
+	TicketGuardianReady TicketConditionType = "GuardianReady"
+	// TicketExpiring indicates the ticket is about to expire
+	TicketExpiring TicketConditionType = "Expiring"
+)
+
+// TicketCondition describes the state of a ticket at a certain point
+type TicketCondition struct {
+	// Type of ticket condition
+	Type TicketConditionType `json:"type"`
+
+	// Status of the condition
+	Status corev1.ConditionStatus `json:"status"`
+
+	// Last time the condition transitioned
+	// +optional
+	LastTransitionTime *metav1.Time `json:"lastTransitionTime,omitempty"`
+
+	// Reason for the condition's last transition
+	// +optional
+	Reason *string `json:"reason,omitempty"`
+
+	// Message providing details about the condition
+	// +optional
+	Message *string `json:"message,omitempty"`
+}
+
+// TicketStatus defines the observed state of Ticket
 type TicketStatus struct {
-	// INSERT ADDITIONAL STATUS FIELD - define observed state of cluster
-	// Important: Run "make" to regenerate code after modifying this file
+	// Phase of the ticket lifecycle
+	// +optional
+	Phase TicketPhase `json:"phase,omitempty"`
+
+	// ActivationTime when the ticket was activated
+	// +optional
+	ActivationTime *metav1.Time `json:"activationTime,omitempty"`
+
+	// ExpirationTime when the ticket expires
+	// +optional
+	ExpirationTime *metav1.Time `json:"expirationTime,omitempty"`
+
+	// ClaimedTime when the ticket was claimed
+	// +optional
+	ClaimedTime *metav1.Time `json:"claimedTime,omitempty"`
+
+	// UtilizationRate of the reserved resources (as string to avoid float)
+	// +optional
+	UtilizationRate *string `json:"utilizationRate,omitempty"`
+
+	// NodeName where the guardian pod is running
+	// +optional
+	NodeName *string `json:"nodeName,omitempty"`
+
+	// PodName of the guardian pod
+	// +optional
+	PodName *string `json:"podName,omitempty"`
+
+	// PodNamespace of the guardian pod
+	// +optional
+	PodNamespace *string `json:"podNamespace,omitempty"`
+
+	// Message providing details about the current state
+	// +optional
+	Message *string `json:"message,omitempty"`
+
+	// Reason for the current state
+	// +optional
+	Reason *string `json:"reason,omitempty"`
+
+	// ObservedGeneration reflects the generation of the most recently observed Ticket
+	// +optional
+	ObservedGeneration *int64 `json:"observedGeneration,omitempty"`
+
+	// Conditions represent the latest available observations of the ticket's current state
+	// +optional
+	Conditions []TicketCondition `json:"conditions,omitempty"`
 }
 
 // +kubebuilder:object:root=true

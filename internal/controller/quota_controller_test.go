@@ -18,7 +18,6 @@ package controller
 
 import (
 	"context"
-	"time"
 
 	. "github.com/onsi/ginkgo/v2"
 	. "github.com/onsi/gomega"
@@ -32,7 +31,7 @@ import (
 	corev1alpha1 "github.com/monshunter/korder/api/v1alpha1"
 )
 
-var _ = Describe("Order Controller", func() {
+var _ = Describe("Quota Controller", func() {
 	Context("When reconciling a resource", func() {
 		const resourceName = "test-resource"
 
@@ -42,32 +41,24 @@ var _ = Describe("Order Controller", func() {
 			Name:      resourceName,
 			Namespace: "default", // TODO(user):Modify as needed
 		}
-		order := &corev1alpha1.Order{}
+		quota := &corev1alpha1.Quota{}
 
 		BeforeEach(func() {
-			By("creating the custom resource for the Kind Order")
-			err := k8sClient.Get(ctx, typeNamespacedName, order)
+			By("creating the custom resource for the Kind Quota")
+			err := k8sClient.Get(ctx, typeNamespacedName, quota)
 			if err != nil && errors.IsNotFound(err) {
-				resource := &corev1alpha1.Order{
+				resource := &corev1alpha1.Quota{
 					ObjectMeta: metav1.ObjectMeta{
 						Name:      resourceName,
 						Namespace: "default",
 					},
-					Spec: corev1alpha1.OrderSpec{
-						Replicas: func() *int32 { i := int32(1); return &i }(),
-						Strategy: corev1alpha1.OrderStrategy{
-							Type: corev1alpha1.OneTimeStrategy,
+					Spec: corev1alpha1.QuotaSpec{
+						Scope: corev1alpha1.QuotaScope{
+							Type: corev1alpha1.ClusterScope,
 						},
-						Template: corev1alpha1.TicketTemplate{
-							Spec: corev1alpha1.TicketTemplateSpec{
-								Duration: &metav1.Duration{Duration: time.Hour * 24},
-								Resources: &corev1.ResourceRequirements{
-									Requests: corev1.ResourceList{
-										corev1.ResourceCPU:    resource.MustParse("100m"),
-										corev1.ResourceMemory: resource.MustParse("128Mi"),
-									},
-								},
-							},
+						Hard: corev1.ResourceList{
+							"orders":  *resource.NewQuantity(10, resource.DecimalSI),
+							"tickets": *resource.NewQuantity(100, resource.DecimalSI),
 						},
 					},
 				}
@@ -77,16 +68,16 @@ var _ = Describe("Order Controller", func() {
 
 		AfterEach(func() {
 			// TODO(user): Cleanup logic after each test, like removing the resource instance.
-			resource := &corev1alpha1.Order{}
+			resource := &corev1alpha1.Quota{}
 			err := k8sClient.Get(ctx, typeNamespacedName, resource)
 			Expect(err).NotTo(HaveOccurred())
 
-			By("Cleanup the specific resource instance Order")
+			By("Cleanup the specific resource instance Quota")
 			Expect(k8sClient.Delete(ctx, resource)).To(Succeed())
 		})
 		It("should successfully reconcile the resource", func() {
 			By("Reconciling the created resource")
-			controllerReconciler := &OrderReconciler{
+			controllerReconciler := &QuotaReconciler{
 				Client: k8sClient,
 				Scheme: k8sClient.Scheme(),
 			}

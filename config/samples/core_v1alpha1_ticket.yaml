@@ -4,6 +4,150 @@ metadata:
   labels:
     app.kubernetes.io/name: korder
     app.kubernetes.io/managed-by: kustomize
+    korder.dev/order: my-order
   name: ticket-sample
+  namespace: default
 spec:
-  # TODO(user): Add fields here
+  # Ticket duration
+  duration: 1h
+  
+  # Start time (optional, defaults to now)
+  startTime: "2025-01-01T10:00:00Z"
+  
+  # Resource requirements
+  resources:
+    requests:
+      cpu: 500m
+      memory: 1Gi
+    limits:
+      cpu: 1000m
+      memory: 2Gi
+  
+  # Scheduling preferences
+  schedulerName: default-scheduler
+  priorityClassName: normal
+  
+  # Node assignment (optional)
+  nodeSelector:
+    zone: us-west-1a
+    instance-type: c5.large
+  
+  # Tolerations for dedicated nodes
+  tolerations:
+  - key: dedicated
+    operator: Equal
+    value: ml-workload
+    effect: NoSchedule
+  
+  # Affinity rules
+  affinity:
+    nodeAffinity:
+      preferredDuringSchedulingIgnoredDuringExecution:
+      - weight: 100
+        preference:
+          matchExpressions:
+          - key: node-type
+            operator: In
+            values:
+            - compute-optimized
+    podAntiAffinity:
+      preferredDuringSchedulingIgnoredDuringExecution:
+      - weight: 50
+        podAffinityTerm:
+          labelSelector:
+            matchLabels:
+              app: same-app
+          topologyKey: kubernetes.io/hostname
+  
+  # Topology spread constraints
+  topologySpreadConstraints:
+  - maxSkew: 1
+    topologyKey: zone
+    whenUnsatisfiable: DoNotSchedule
+    labelSelector:
+      matchLabels:
+        app: distributed-app
+  
+  # Lifecycle management
+  lifecycle:
+    ttlSecondsAfterFinished: 3600  # Keep ticket 1 hour after completion
+    cleanupPolicy: Delete          # Delete when expired
+---
+apiVersion: core.korder.dev/v1alpha1
+kind: Ticket
+metadata:
+  labels:
+    app.kubernetes.io/name: korder
+    app.kubernetes.io/managed-by: kustomize
+    korder.dev/order: gpu-order
+    workload-type: ml-training
+  name: gpu-ticket-sample
+  namespace: default
+spec:
+  # Long duration for ML training
+  duration: 8h
+  
+  # High resource requirements for GPU workload
+  resources:
+    requests:
+      cpu: 4
+      memory: 16Gi
+      nvidia.com/gpu: 1
+    limits:
+      cpu: 8
+      memory: 32Gi
+      nvidia.com/gpu: 1
+  
+  # GPU node selection
+  nodeSelector:
+    node-type: gpu
+    gpu-type: v100
+  
+  # GPU toleration
+  tolerations:
+  - key: nvidia.com/gpu
+    operator: Exists
+    effect: NoSchedule
+  
+  # High priority for expensive resources
+  priorityClassName: high-priority
+  
+  # Lifecycle - keep longer for debugging
+  lifecycle:
+    ttlSecondsAfterFinished: 7200  # Keep 2 hours after completion
+    cleanupPolicy: Retain          # Don't auto-delete for investigation
+---
+apiVersion: core.korder.dev/v1alpha1
+kind: Ticket
+metadata:
+  labels:
+    app.kubernetes.io/name: korder
+    app.kubernetes.io/managed-by: kustomize
+    korder.dev/order: batch-order
+    job-type: batch-processing
+  name: batch-ticket-sample
+  namespace: default
+spec:
+  # Short duration for batch jobs
+  duration: 30m
+  
+  # Moderate resources for batch processing
+  resources:
+    requests:
+      cpu: 1
+      memory: 2Gi
+    limits:
+      cpu: 2
+      memory: 4Gi
+  
+  # Standard node selection
+  nodeSelector:
+    workload-type: standard
+  
+  # Standard priority
+  priorityClassName: normal
+  
+  # Quick cleanup for batch jobs
+  lifecycle:
+    ttlSecondsAfterFinished: 600   # Keep 10 minutes after completion
+    cleanupPolicy: Delete          # Auto-delete quickly
