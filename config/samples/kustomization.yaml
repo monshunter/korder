@@ -1,0 +1,5 @@
+## Append samples of your project ##
+resources:
+- core_v1alpha1_order.yaml
+- core_v1alpha1_ticket.yaml
+# +kubebuilder:scaffold:manifestskustomizesamples

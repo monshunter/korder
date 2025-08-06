@@ -1,0 +1,68 @@
+apiVersion: core.korder.dev/v1alpha1
+kind: Ticket
+metadata:
+  name: ticket-sample
+spec:
+  lifecycle:
+    ttlSecondsAfterFinished: 3600  # 完成后保留时间
+    cleanupPolicy: "Delete|Retain"
+  startTime: "2023-01-01T00:00:00Z"
+  duration: 3600s
+  schedulerName: default-scheduler
+  priorityClassName: "priority-class-name"
+  # 以下字段全来自PodSpec, 所以应该和PodSpec同名自定保持定义一致
+  resources:
+    cpu: 100m
+    memory: 500Mi
+  nodeName: "node-1"
+  nodeSelector:
+    kubernetes.io/arch: amd64
+  affinity:
+    nodeAffinity:
+      requiredDuringSchedulingIgnoredDuringExecution:
+        nodeSelectorTerms:
+        - matchExpressions:
+          - key: kubernetes.io/arch
+            operator: In
+            values:
+            - amd64
+        - matchExpressions:
+          - key: kubernetes.io/os
+            operator: In
+            values:
+            - linux
+      preferredDuringSchedulingIgnoredDuringExecution: []
+    podAffinity: {}
+    podAntiAffinity: {}
+  tolerations:
+    - key: "key1"
+      operator: "Equal"
+      value: "value1"
+      effect: "NoSchedule"
+  topologySpreadConstraints:
+    - maxSkew: 1
+      topologyKey: "topology.kubernetes.io/zone"
+      whenUnsatisfiable: "DoNotSchedule"
+      labelSelector:
+        matchLabels:
+          app: "app-name"
+          env: "dev"
+status:
+# --- 动态状态 ---
+  phase: Reserved  # 状态：Pending -> Reserved -> Claimed -> Expired
+  activationTime: "2024-10-21T10:00:00Z"  # 实际激活时间（由控制器设置）
+  expirationTime: "2024-10-21T12:00:00Z"  # 过期时间（activationTime + duration）
+  claimedTime: "2024-10-21T10:30:00Z"  # 被Claim的时间
+  utilizationRate: 0.8  # 资源利用率
+  nodeName: "node-5"  # 守护者Pod所在的节点（由控制器绑定）
+  podName: "korder-ticket-ci-hot-pool-abc123"  # 守护者Pod的名称
+  podNamespace: "korder-system"  # 守护者Pod的命名空间
+  message: "Ticket is ready" # 解释为什么是当前状态的原因（人类可读）
+  reason: "TicketReady" # 状态的原因
+  # Add observed state of the resource here.
+  observedGeneration: 1
+  conditions:
+  - type: Ready
+    status: "True"
+    reason: TicketReady
+    message: Ticket is ready

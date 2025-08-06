@@ -1,0 +1,45 @@
+apiVersion: core.korder.dev/v1alpha1
+kind: Quota
+metadata:
+  name: team-a-cluster-quota
+spec:
+  # 支持多种范围
+  scope:
+    # Cluster 范围整个集群只能有一个配额
+    type: "Cluster|NamespaceSelector|NamespaceList|ObjectSelector"
+    # 或者通过标签选择器选择
+    namespaceSelector:
+      matchLabels:
+        team: "team-a"
+    # 或者明确指定
+    namespaces: ["team-a-dev", "team-a-staging", "team-a-prod"]
+    objectSelector:
+      matchLabels:
+        team: "team-a"
+  
+  hard:
+    # 整个团队在集群级别的配额
+    orders: "20"
+    tickets: "200"
+    reserved.cpu: "100"      # 预留CPU总量
+    reserved.memory: "200Gi" # 预留内存总量
+    max-duration: "24h"          # 最长预留时间
+    
+  # 可选：按环境分配子配额
+  allocation:
+    - namespace: "team-a-prod"
+      limits:
+        reserved.cpu: "60"    # 生产环境占大头
+        reserved.memory: "120Gi"
+    - namespace: "team-a-dev"
+      limits:
+        reserved.cpu: "20"
+        reserved.memory: "40Gi"
+    # 时间窗口配额（这是K8s ResourceQuota做不到的）
+  timeWindows:
+    - name: "business-hours"
+      schedule: "0 9-17 * * 1-5"  # 工作时间
+      multiplier: 2.0             # 工作时间可以用2倍配额
+    - name: "off-hours"
+      schedule: "0 18-8 * * *"    # 非工作时间
+      multiplier: 0.5             # 非工作时间只能用一半配额

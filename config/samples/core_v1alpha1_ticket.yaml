@@ -1,0 +1,9 @@
+apiVersion: core.korder.dev/v1alpha1
+kind: Ticket
+metadata:
+  labels:
+    app.kubernetes.io/name: korder
+    app.kubernetes.io/managed-by: kustomize
+  name: ticket-sample
+spec:
+  # TODO(user): Add fields here
