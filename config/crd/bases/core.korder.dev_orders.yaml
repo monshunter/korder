@@ -39,12 +39,20 @@ spec:
           spec:
             description: spec defines the desired state of Order
             properties:
+              daemonSet:
+                description: |-
+                  DaemonSet indicates whether to create one ticket per eligible node
+                  When true, replicas field is ignored and the system automatically creates
+                  one ticket for each node that matches the nodeSelector and tolerations
+                type: boolean
               paused:
                 description: Paused indicates that the order is paused
                 type: boolean
               replicas:
                 default: 1
-                description: Replicas defines the number of tickets to create
+                description: |-
+                  Replicas defines the number of tickets to create
+                  When DaemonSet is true, this field is ignored and one ticket per eligible node is created
                 format: int32
                 minimum: 0
                 type: integer

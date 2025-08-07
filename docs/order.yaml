@@ -4,6 +4,8 @@ metadata:
   name: order-sample
 spec:
   paused: false # optional, 暂停订单
+  # Enable DaemonSet mode - one ticket per eligible node
+  daemonSet: true
   replicas: 1
   strategy:
     type: "OneTime|Scheduled|Recurring"  # 合并策略类型

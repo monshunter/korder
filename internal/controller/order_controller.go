@@ -25,10 +25,13 @@ import (
 	apierrors "k8s.io/apimachinery/pkg/api/errors"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 	"k8s.io/apimachinery/pkg/runtime"
+	"k8s.io/apimachinery/pkg/types"
 	ctrl "sigs.k8s.io/controller-runtime"
 	"sigs.k8s.io/controller-runtime/pkg/client"
 	"sigs.k8s.io/controller-runtime/pkg/controller/controllerutil"
+	"sigs.k8s.io/controller-runtime/pkg/handler"
 	logf "sigs.k8s.io/controller-runtime/pkg/log"
+	"sigs.k8s.io/controller-runtime/pkg/reconcile"
 
 	corev1alpha1 "github.com/monshunter/korder/api/v1alpha1"
 	"github.com/monshunter/korder/internal/metrics"
@@ -143,9 +146,23 @@ func (r *OrderReconciler) reconcileTickets(ctx context.Context, order *corev1alp
 	}
 
 	// Calculate desired replicas
-	desiredReplicas := int32(1)
-	if order.Spec.Replicas != nil {
-		desiredReplicas = *order.Spec.Replicas
+	var desiredReplicas int32
+	if order.Spec.DaemonSet != nil && *order.Spec.DaemonSet {
+		// DaemonSet mode: calculate replicas based on eligible nodes
+		eligibleNodes, err := r.getEligibleNodes(ctx, order)
+		if err != nil {
+			log.Error(err, "Failed to get eligible nodes for DaemonSet order")
+			return ctrl.Result{}, err
+		}
+		desiredReplicas = int32(len(eligibleNodes))
+		log.Info("DaemonSet mode: calculated desired replicas based on eligible nodes",
+			"eligibleNodes", len(eligibleNodes), "desiredReplicas", desiredReplicas)
+	} else {
+		// Normal mode: use specified replicas
+		desiredReplicas = int32(1)
+		if order.Spec.Replicas != nil {
+			desiredReplicas = *order.Spec.Replicas
+		}
 	}
 
 	// Handle different strategies
@@ -522,11 +539,160 @@ func (r *OrderReconciler) updateOrderStatus(ctx context.Context, order *corev1al
 	return ctrl.Result{}, nil
 }
 
+// getEligibleNodes returns nodes that are eligible for DaemonSet tickets based on nodeSelector and tolerations
+func (r *OrderReconciler) getEligibleNodes(ctx context.Context, order *corev1alpha1.Order) ([]corev1.Node, error) {
+	log := logf.FromContext(ctx)
+
+	// Get all nodes in the cluster
+	nodeList := &corev1.NodeList{}
+	if err := r.List(ctx, nodeList); err != nil {
+		return nil, fmt.Errorf("failed to list nodes: %w", err)
+	}
+
+	var eligibleNodes []corev1.Node
+
+	for _, node := range nodeList.Items {
+		// Skip nodes that are not ready or schedulable
+		if !r.isNodeReady(&node) || !r.isNodeSchedulable(&node) {
+			log.V(1).Info("Skipping node: not ready or not schedulable", "node", node.Name)
+			continue
+		}
+
+		// Check if node matches nodeSelector from ticket template
+		if !r.nodeMatchesSelector(&node, order.Spec.Template.Spec.NodeSelector) {
+			log.V(1).Info("Skipping node: does not match nodeSelector", "node", node.Name)
+			continue
+		}
+
+		// Check if tolerations allow scheduling on this node
+		if !r.nodeToleratesTicket(&node, order.Spec.Template.Spec.Tolerations) {
+			log.V(1).Info("Skipping node: tolerations do not allow scheduling", "node", node.Name)
+			continue
+		}
+
+		eligibleNodes = append(eligibleNodes, node)
+		log.V(1).Info("Node is eligible for DaemonSet ticket", "node", node.Name)
+	}
+
+	log.Info("Found eligible nodes for DaemonSet order", "total", len(nodeList.Items), "eligible", len(eligibleNodes))
+	return eligibleNodes, nil
+}
+
+// isNodeReady checks if a node is in Ready condition
+func (r *OrderReconciler) isNodeReady(node *corev1.Node) bool {
+	for _, condition := range node.Status.Conditions {
+		if condition.Type == corev1.NodeReady {
+			return condition.Status == corev1.ConditionTrue
+		}
+	}
+	return false
+}
+
+// isNodeSchedulable checks if a node is schedulable (not cordoned)
+func (r *OrderReconciler) isNodeSchedulable(node *corev1.Node) bool {
+	return !node.Spec.Unschedulable
+}
+
+// nodeMatchesSelector checks if a node matches the given nodeSelector
+func (r *OrderReconciler) nodeMatchesSelector(node *corev1.Node, nodeSelector map[string]string) bool {
+	if nodeSelector == nil {
+		return true
+	}
+
+	for key, value := range nodeSelector {
+		if nodeValue, exists := node.Labels[key]; !exists || nodeValue != value {
+			return false
+		}
+	}
+	return true
+}
+
+// nodeToleratesTicket checks if the ticket's tolerations allow it to be scheduled on the node
+func (r *OrderReconciler) nodeToleratesTicket(node *corev1.Node, tolerations []corev1.Toleration) bool {
+	// If no tolerations specified, only schedule on nodes without taints
+	if len(tolerations) == 0 {
+		return len(node.Spec.Taints) == 0
+	}
+
+	// Check each taint on the node
+	for _, taint := range node.Spec.Taints {
+		tolerated := false
+		for _, toleration := range tolerations {
+			if r.tolerationToleratesTaint(&toleration, &taint) {
+				tolerated = true
+				break
+			}
+		}
+		if !tolerated {
+			return false
+		}
+	}
+	return true
+}
+
+// tolerationToleratesTaint checks if a toleration tolerates a specific taint
+func (r *OrderReconciler) tolerationToleratesTaint(toleration *corev1.Toleration, taint *corev1.Taint) bool {
+	// Handle operator Exists
+	if toleration.Operator == corev1.TolerationOpExists {
+		// If key is empty, tolerate all taints
+		if toleration.Key == "" {
+			return true
+		}
+		// If key matches and effect matches (or effect is empty), tolerate
+		return toleration.Key == taint.Key && (toleration.Effect == "" || toleration.Effect == taint.Effect)
+	}
+
+	// Handle operator Equal (default)
+	return toleration.Key == taint.Key &&
+		toleration.Value == taint.Value &&
+		(toleration.Effect == "" || toleration.Effect == taint.Effect)
+}
+
+// findOrdersForNode returns reconcile requests for DaemonSet orders that might be affected by node changes
+func (r *OrderReconciler) findOrdersForNode(ctx context.Context, obj client.Object) []reconcile.Request {
+	node, ok := obj.(*corev1.Node)
+	if !ok {
+		return nil
+	}
+
+	log := logf.FromContext(ctx)
+	log.V(1).Info("Node changed, finding affected DaemonSet orders", "node", node.Name)
+
+	// Get all orders in all namespaces
+	orderList := &corev1alpha1.OrderList{}
+	if err := r.List(ctx, orderList); err != nil {
+		log.Error(err, "Failed to list orders for node change")
+		return nil
+	}
+
+	var requests []reconcile.Request
+	for _, order := range orderList.Items {
+		// Only consider DaemonSet orders
+		if order.Spec.DaemonSet != nil && *order.Spec.DaemonSet {
+			requests = append(requests, reconcile.Request{
+				NamespacedName: types.NamespacedName{
+					Name:      order.Name,
+					Namespace: order.Namespace,
+				},
+			})
+			log.V(1).Info("Enqueuing DaemonSet order for reconciliation due to node change",
+				"order", order.Name, "namespace", order.Namespace, "node", node.Name)
+		}
+	}
+
+	log.V(1).Info("Found DaemonSet orders affected by node change", "count", len(requests), "node", node.Name)
+	return requests
+}
+
 // SetupWithManager sets up the controller with the Manager.
 func (r *OrderReconciler) SetupWithManager(mgr ctrl.Manager) error {
 	return ctrl.NewControllerManagedBy(mgr).
 		For(&corev1alpha1.Order{}).
 		Owns(&corev1alpha1.Ticket{}).
+		Watches(
+			&corev1.Node{},
+			handler.EnqueueRequestsFromMapFunc(r.findOrdersForNode),
+		).
 		Named("order").
 		Complete(r)
 }

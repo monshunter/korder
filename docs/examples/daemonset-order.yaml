@@ -1,0 +1,237 @@
+# DaemonSet Order Examples
+# These examples demonstrate how to use korder's DaemonSet mode to reserve resources on every eligible node
+
+---
+# Example 1: Basic infrastructure resource reservation
+# Reserves resources for monitoring agents on all Linux nodes
+apiVersion: core.korder.dev/v1alpha1
+kind: Order
+metadata:
+  name: monitoring-agent-reservation
+  namespace: korder-system
+spec:
+  # Enable DaemonSet mode - one ticket per eligible node
+  daemonSet: true
+  
+  # Strategy for maintaining reservations
+  strategy:
+    type: Recurring
+    schedule: "0 */6 * * *"  # Check every 6 hours
+    refreshPolicy: OnClaim
+  
+  # Ticket template applied to each node
+  template:
+    metadata:
+      labels:
+        app: monitoring-agent
+        tier: infrastructure
+        korder.dev/purpose: node-reservation
+    spec:
+      # Reserve resources for 24 hours
+      duration: 24h
+      
+      # Resource requirements per node
+      resources:
+        requests:
+          cpu: 100m
+          memory: 200Mi
+          ephemeral-storage: 1Gi
+        limits:
+          cpu: 200m
+          memory: 400Mi
+          ephemeral-storage: 2Gi
+      
+      # Schedule on all Linux nodes
+      nodeSelector:
+        kubernetes.io/os: linux
+      
+      # Tolerate common taints
+      tolerations:
+        - operator: Exists
+          effect: NoSchedule
+        - operator: Exists
+          effect: NoExecute
+
+---
+# Example 2: GPU node resource buffer
+# Reserves buffer resources on GPU nodes to prevent over-allocation
+apiVersion: core.korder.dev/v1alpha1
+kind: Order
+metadata:
+  name: gpu-node-buffer
+  namespace: default
+spec:
+  daemonSet: true
+  
+  strategy:
+    type: OneTime
+    refreshPolicy: Never
+  
+  template:
+    metadata:
+      labels:
+        app: gpu-buffer
+        tier: infrastructure
+    spec:
+      duration: 168h  # 1 week
+      
+      # Reserve buffer resources on GPU nodes
+      resources:
+        requests:
+          cpu: 500m
+          memory: 1Gi
+        limits:
+          cpu: 1000m
+          memory: 2Gi
+      
+      # Only target GPU nodes
+      nodeSelector:
+        accelerator: nvidia-tesla-k80
+      
+      # Tolerate GPU node taints
+      tolerations:
+        - key: nvidia.com/gpu
+          operator: Exists
+          effect: NoSchedule
+
+---
+# Example 3: Edge computing node reservation
+# Reserves resources on edge nodes for local processing
+apiVersion: core.korder.dev/v1alpha1
+kind: Order
+metadata:
+  name: edge-node-reservation
+  namespace: edge-computing
+spec:
+  daemonSet: true
+  
+  strategy:
+    type: Scheduled
+    schedule: "0 2 * * *"  # Daily at 2 AM
+    refreshPolicy: Always
+  
+  template:
+    metadata:
+      labels:
+        app: edge-processor
+        tier: edge
+        zone: edge
+    spec:
+      duration: 20h  # Reserve for 20 hours (until next refresh)
+      
+      resources:
+        requests:
+          cpu: 200m
+          memory: 512Mi
+        limits:
+          cpu: 500m
+          memory: 1Gi
+      
+      # Target edge nodes
+      nodeSelector:
+        node-type: edge
+        kubernetes.io/os: linux
+      
+      # Edge nodes might have special taints
+      tolerations:
+        - key: edge-node
+          operator: Equal
+          value: "true"
+          effect: NoSchedule
+        - key: node.kubernetes.io/unreachable
+          operator: Exists
+          effect: NoExecute
+          tolerationSeconds: 300
+
+---
+# Example 4: Security scanning agent reservation
+# Reserves resources for security scanning on all nodes
+apiVersion: core.korder.dev/v1alpha1
+kind: Order
+metadata:
+  name: security-scanner-reservation
+  namespace: security
+spec:
+  daemonSet: true
+  
+  strategy:
+    type: Recurring
+    schedule: "0 0 * * 0"  # Weekly on Sunday
+    refreshPolicy: Always
+  
+  template:
+    metadata:
+      labels:
+        app: security-scanner
+        tier: security
+        compliance: required
+    spec:
+      duration: 168h  # 1 week
+      
+      # Minimal resources for security scanning
+      resources:
+        requests:
+          cpu: 50m
+          memory: 128Mi
+        limits:
+          cpu: 100m
+          memory: 256Mi
+      
+      # All nodes need security scanning
+      nodeSelector:
+        kubernetes.io/os: linux
+      
+      # Must tolerate all taints for security compliance
+      tolerations:
+        - operator: Exists
+
+---
+# Example 5: Log collection buffer
+# Reserves resources for log collection on all nodes
+apiVersion: core.korder.dev/v1alpha1
+kind: Order
+metadata:
+  name: log-collector-buffer
+  namespace: logging
+spec:
+  daemonSet: true
+  
+  strategy:
+    type: OneTime
+    refreshPolicy: OnClaim
+  
+  template:
+    metadata:
+      labels:
+        app: log-collector
+        tier: infrastructure
+        component: logging
+    spec:
+      duration: 720h  # 30 days
+      
+      # Resources for log collection and buffering
+      resources:
+        requests:
+          cpu: 100m
+          memory: 256Mi
+          ephemeral-storage: 5Gi
+        limits:
+          cpu: 200m
+          memory: 512Mi
+          ephemeral-storage: 10Gi
+      
+      # All schedulable nodes
+      nodeSelector:
+        kubernetes.io/os: linux
+      
+      # Tolerate most common taints
+      tolerations:
+        - key: node-role.kubernetes.io/master
+          operator: Exists
+          effect: NoSchedule
+        - key: node-role.kubernetes.io/control-plane
+          operator: Exists
+          effect: NoSchedule
+        - operator: Exists
+          effect: NoExecute
+          tolerationSeconds: 300

@@ -127,6 +127,11 @@ func (in *OrderSpec) DeepCopyInto(out *OrderSpec) {
 		*out = new(int32)
 		**out = **in
 	}
+	if in.DaemonSet != nil {
+		in, out := &in.DaemonSet, &out.DaemonSet
+		*out = new(bool)
+		**out = **in
+	}
 	in.Strategy.DeepCopyInto(&out.Strategy)
 	if in.Selector != nil {
 		in, out := &in.Selector, &out.Selector

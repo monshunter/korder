@@ -84,6 +84,7 @@
 - **⏰ Time Scheduling**: Support one-time, scheduled, and recurring resource allocation strategies
 - **🔍 Auto Discovery**: Automatically bind business pods to reserved resources via Admission Webhook
 - **🗂️ Multiple Strategies**: Different resource allocation modes like OneTime, Scheduled, Recurring
+- **🌐 DaemonSet Mode**: Automatically reserve resources on every eligible node for infrastructure services
 
 ## 🚀 Quick Start
 
@@ -272,6 +273,63 @@ spec:
     reserved.cpu: "20"        # Max 20 CPU cores reserved
     reserved.memory: "40Gi"   # Max 40GB memory reserved
     max-duration: "24h"       # Max reservation time 24 hours
+```
+
+#### 5. DaemonSet mode for node-level reservations
+
+```yaml
+apiVersion: core.korder.dev/v1alpha1
+kind: Order
+metadata:
+  name: monitoring-agent-reservation
+  namespace: korder-system
+spec:
+  # Enable DaemonSet mode - one ticket per eligible node
+  daemonSet: true
+
+  # Strategy for maintaining reservations
+  strategy:
+    type: Recurring
+    schedule: "0 */6 * * *"  # Check every 6 hours
+    refreshPolicy: OnClaim
+
+  # Ticket template applied to each node
+  template:
+    metadata:
+      labels:
+        app: monitoring-agent
+        tier: infrastructure
+    spec:
+      duration: 24h
+
+      # Resource requirements per node
+      resources:
+        requests:
+          cpu: 100m
+          memory: 200Mi
+        limits:
+          cpu: 200m
+          memory: 400Mi
+
+      # Schedule on all Linux nodes
+      nodeSelector:
+        kubernetes.io/os: linux
+
+      # Tolerate common taints
+      tolerations:
+        - operator: Exists
+          effect: NoSchedule
+```
+
+```bash
+# Apply DaemonSet order
+kubectl apply -f daemonset-order.yaml
+
+# Check tickets created (one per eligible node)
+kubectl get tickets -l korder.dev/order=monitoring-agent-reservation
+
+# Check guardian pods on each node
+kubectl get pods -l korder.dev/role=guardian -o wide
 ```
 
 ### Monitoring and Debugging

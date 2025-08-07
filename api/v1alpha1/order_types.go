@@ -147,9 +147,16 @@ type OrderSpec struct {
 	Paused *bool `json:"paused,omitempty"`
 
 	// Replicas defines the number of tickets to create
+	// When DaemonSet is true, this field is ignored and one ticket per eligible node is created
 	// +kubebuilder:validation:Minimum=0
 	// +kubebuilder:default=1
 	Replicas *int32 `json:"replicas,omitempty"`
+
+	// DaemonSet indicates whether to create one ticket per eligible node
+	// When true, replicas field is ignored and the system automatically creates
+	// one ticket for each node that matches the nodeSelector and tolerations
+	// +optional
+	DaemonSet *bool `json:"daemonSet,omitempty"`
 
 	// Strategy defines how tickets are created and managed
 	Strategy OrderStrategy `json:"strategy"`
