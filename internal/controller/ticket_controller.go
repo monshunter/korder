@@ -19,6 +19,7 @@ package controller
 import (
 	"context"
 	"fmt"
+	"strings"
 	"time"
 
 	corev1 "k8s.io/api/core/v1"
@@ -115,15 +116,21 @@ func (r *TicketReconciler) handleDeletion(ctx context.Context, ticket *corev1alp
 
 	// Clean up guardian pod
 	if err := r.deleteGuardianPod(ctx, ticket); err != nil {
+		if apierrors.IsNotFound(err) {
+			return ctrl.Result{}, nil
+		}
 		log.Error(err, "Failed to delete guardian pod")
-		return ctrl.Result{}, err
+		return ctrl.Result{Requeue: true}, err
 	}
 
 	// Remove finalizer
 	controllerutil.RemoveFinalizer(ticket, TicketFinalizerName)
 	if err := r.Update(ctx, ticket); err != nil {
+		if apierrors.IsNotFound(err) {
+			return ctrl.Result{}, nil
+		}
 		log.Error(err, "Failed to remove finalizer")
-		return ctrl.Result{}, err
+		return ctrl.Result{Requeue: true}, err
 	}
 
 	log.Info("Ticket deleted successfully")
@@ -149,14 +156,17 @@ func (r *TicketReconciler) handlePendingTicket(ctx context.Context, ticket *core
 	// Create guardian pod
 	pod, err := r.createGuardianPod(ctx, ticket)
 	if err != nil {
+		if apierrors.IsAlreadyExists(err) {
+			return r.handleReservedTicket(ctx, ticket)
+		}
 		log.Error(err, "Failed to create guardian pod")
 		return r.updateTicketStatus(ctx, ticket, corev1alpha1.TicketPending, "Failed", fmt.Sprintf("Failed to create guardian pod: %v", err))
 	}
 
 	// Update ticket status
 	ticket.Status.Phase = corev1alpha1.TicketReserved
-	ticket.Status.PodName = &pod.Name
-	ticket.Status.PodNamespace = &pod.Namespace
+	guardianPodName := fmt.Sprintf("%s/%s", pod.Namespace, pod.Name)
+	ticket.Status.GuardianPod = &guardianPodName
 	ticket.Status.NodeName = &pod.Spec.NodeName
 
 	log.Info("Ticket activated", "ticket", ticket.Name, "pod", pod.Name)
@@ -168,16 +178,23 @@ func (r *TicketReconciler) handleReservedTicket(ctx context.Context, ticket *cor
 	log := logf.FromContext(ctx)
 
 	// Check if guardian pod still exists and is running
-	if ticket.Status.PodName != nil {
+	if ticket.Status.GuardianPod != nil {
+		// Parse namespace/name format
+		parts := strings.Split(*ticket.Status.GuardianPod, "/")
+		if len(parts) != 2 {
+			log.Error(nil, "Invalid guardian pod format", "guardianPod", *ticket.Status.GuardianPod)
+			return r.handlePendingTicket(ctx, ticket)
+		}
+
 		pod := &corev1.Pod{}
 		podKey := types.NamespacedName{
-			Name:      *ticket.Status.PodName,
-			Namespace: ticket.Namespace,
+			Name:      parts[1],
+			Namespace: parts[0],
 		}
 
 		if err := r.Get(ctx, podKey, pod); err != nil {
 			if apierrors.IsNotFound(err) {
-				log.Info("Guardian pod not found, recreating", "pod", *ticket.Status.PodName)
+				log.Info("Guardian pod not found, recreating", "guardianPod", *ticket.Status.GuardianPod)
 				return r.handlePendingTicket(ctx, ticket)
 			}
 			return ctrl.Result{}, err
@@ -208,9 +225,8 @@ func (r *TicketReconciler) handleClaimedTicket(ctx context.Context, ticket *core
 		return ctrl.Result{}, err
 	}
 
-	// Clear pod references since guardian is deleted
-	ticket.Status.PodName = nil
-	ticket.Status.PodNamespace = nil
+	// Clear guardian pod reference since it's deleted
+	ticket.Status.GuardianPod = nil
 
 	log.Info("Guardian pod deleted for claimed ticket", "ticket", ticket.Name)
 	return r.updateTicketStatus(ctx, ticket, corev1alpha1.TicketClaimed, "Claimed", "Ticket claimed and guardian pod deleted")
@@ -301,7 +317,7 @@ func (r *TicketReconciler) createGuardianPod(ctx context.Context, ticket *corev1
 			Containers: []corev1.Container{
 				{
 					Name:      "guardian",
-					Image:     "pause:3.8",
+					Image:     "registry.k8s.io/pause:3.10",
 					Resources: resources,
 				},
 			},
@@ -341,14 +357,20 @@ func (r *TicketReconciler) createGuardianPod(ctx context.Context, ticket *corev1
 
 // deleteGuardianPod deletes the guardian pod associated with the ticket
 func (r *TicketReconciler) deleteGuardianPod(ctx context.Context, ticket *corev1alpha1.Ticket) error {
-	if ticket.Status.PodName == nil {
+	if ticket.Status.GuardianPod == nil {
 		return nil // No pod to delete
+	}
+
+	// Parse namespace/name format
+	parts := strings.Split(*ticket.Status.GuardianPod, "/")
+	if len(parts) != 2 {
+		return fmt.Errorf("invalid guardian pod format: %s", *ticket.Status.GuardianPod)
 	}
 
 	pod := &corev1.Pod{
 		ObjectMeta: metav1.ObjectMeta{
-			Name:      *ticket.Status.PodName,
-			Namespace: ticket.Namespace,
+			Name:      parts[1],
+			Namespace: parts[0],
 		},
 	}
 

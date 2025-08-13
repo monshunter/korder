@@ -50,6 +50,7 @@ type OrderReconciler struct {
 // +kubebuilder:rbac:groups=core.korder.dev,resources=orders/finalizers,verbs=update
 // +kubebuilder:rbac:groups=core.korder.dev,resources=tickets,verbs=get;list;watch;create;update;patch;delete
 // +kubebuilder:rbac:groups="",resources=events,verbs=create;patch
+// +kubebuilder:rbac:groups="",resources=nodes,verbs=get;list;watch
 
 const (
 	OrderFinalizerName = "korder.dev/order-finalizer"

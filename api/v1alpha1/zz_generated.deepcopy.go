@@ -657,13 +657,13 @@ func (in *TicketStatus) DeepCopyInto(out *TicketStatus) {
 		*out = new(string)
 		**out = **in
 	}
-	if in.PodName != nil {
-		in, out := &in.PodName, &out.PodName
+	if in.GuardianPod != nil {
+		in, out := &in.GuardianPod, &out.GuardianPod
 		*out = new(string)
 		**out = **in
 	}
-	if in.PodNamespace != nil {
-		in, out := &in.PodNamespace, &out.PodNamespace
+	if in.ClaimedPod != nil {
+		in, out := &in.ClaimedPod, &out.ClaimedPod
 		*out = new(string)
 		**out = **in
 	}

@@ -374,8 +374,8 @@ func (v *TicketCustomValidator) ValidateDelete(ctx context.Context, obj runtime.
 	}
 
 	// Check if ticket has a guardian pod that will be deleted
-	if ticket.Status.PodName != nil {
-		warnings = append(warnings, fmt.Sprintf("Guardian pod %s will be deleted", *ticket.Status.PodName))
+	if ticket.Status.GuardianPod != nil {
+		warnings = append(warnings, fmt.Sprintf("Guardian pod %s will be deleted", *ticket.Status.GuardianPod))
 	}
 
 	// Allow deletion but provide warnings

@@ -141,13 +141,13 @@ type TicketStatus struct {
 	// +optional
 	NodeName *string `json:"nodeName,omitempty"`
 
-	// PodName of the guardian pod
+	// GuardianPod refers to the guardian pod in format "namespace/name"
 	// +optional
-	PodName *string `json:"podName,omitempty"`
+	GuardianPod *string `json:"guardianPod,omitempty"`
 
-	// PodNamespace of the guardian pod
+	// ClaimedPod refers to the business pod that claimed this ticket in format "namespace/name"
 	// +optional
-	PodNamespace *string `json:"podNamespace,omitempty"`
+	ClaimedPod *string `json:"claimedPod,omitempty"`
 
 	// Message providing details about the current state
 	// +optional
@@ -168,6 +168,12 @@ type TicketStatus struct {
 
 // +kubebuilder:object:root=true
 // +kubebuilder:subresource:status
+// +kubebuilder:printcolumn:name="Phase",type="string",JSONPath=".status.phase",description="Ticket phase"
+// +kubebuilder:printcolumn:name="Node",type="string",JSONPath=".status.nodeName",description="Node where ticket is assigned",priority=1
+// +kubebuilder:printcolumn:name="Claimed-By",type="string",JSONPath=".status.claimedPod",description="Pod that claimed the ticket"
+// +kubebuilder:printcolumn:name="Guardian-Pod",type="string",JSONPath=".status.guardianPod",description="Guardian pod holding the resources",priority=1
+// +kubebuilder:printcolumn:name="Expiration",type="string",JSONPath=".status.expirationTime",description="When the ticket expires",priority=1
+// +kubebuilder:printcolumn:name="Age",type="date",JSONPath=".metadata.creationTimestamp",description="Age of the ticket"
 
 // Ticket is the Schema for the tickets API
 type Ticket struct {

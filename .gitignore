@@ -25,3 +25,10 @@ go.work
 *.swp
 *.swo
 *~
+
+# local file
+up.sh
+down.sh
+test/manual
+debug
+debug.log

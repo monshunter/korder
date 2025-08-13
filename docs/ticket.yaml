@@ -55,8 +55,8 @@ status:
   claimedTime: "2024-10-21T10:30:00Z"  # 被Claim的时间
   utilizationRate: 0.8  # 资源利用率
   nodeName: "node-5"  # 守护者Pod所在的节点（由控制器绑定）
-  podName: "korder-ticket-ci-hot-pool-abc123"  # 守护者Pod的名称
-  podNamespace: "korder-system"  # 守护者Pod的命名空间
+  guardianPod: "namespace/name"  # 守护者Pod的名称
+  claimedPod: "namespace/name"  # 被Claim的Pod的名称
   message: "Ticket is ready" # 解释为什么是当前状态的原因（人类可读）
   reason: "TicketReady" # 状态的原因
   # Add observed state of the resource here.

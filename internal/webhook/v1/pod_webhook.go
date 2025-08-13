@@ -80,13 +80,13 @@ func (d *PodCustomDefaulter) Default(ctx context.Context, obj runtime.Object) er
 		return nil
 	}
 
-	podlog.Info("Processing pod for ticket binding", "pod", pod.Name, "namespace", pod.Namespace)
-
-	// Check if pod requests ticket binding
+	// Check if pod requests ticket binding first (early return for performance)
 	if !d.requestsTicketBinding(pod) {
 		podlog.V(1).Info("Pod does not request ticket binding", "pod", pod.Name)
 		return nil
 	}
+
+	podlog.Info("Processing pod for ticket binding", "pod", pod.Name, "namespace", pod.Namespace)
 
 	// Find and bind to an available ticket
 	ticket, err := d.findAvailableTicket(ctx, pod)
@@ -132,8 +132,10 @@ func (d *PodCustomDefaulter) isGuardianPod(pod *corev1.Pod) bool {
 // requestsTicketBinding checks if the pod requests ticket binding
 func (d *PodCustomDefaulter) requestsTicketBinding(pod *corev1.Pod) bool {
 	if annotations := pod.GetAnnotations(); annotations != nil {
-		// Check for specific ticket request or order request
-		return annotations[TicketRequestAnnotation] != "" || annotations[OrderRequestAnnotation] != ""
+		// Check for specific ticket request, order request, or manual ticket claim
+		return annotations[TicketRequestAnnotation] != "" ||
+			annotations[OrderRequestAnnotation] != "" ||
+			annotations[TicketClaimedAnnotation] != ""
 	}
 	return false
 }
@@ -145,7 +147,12 @@ func (d *PodCustomDefaulter) findAvailableTicket(ctx context.Context, pod *corev
 		return nil, nil
 	}
 
-	// Check for specific ticket request first
+	// Check for manual ticket claim first (already bound)
+	if ticketName := annotations[TicketClaimedAnnotation]; ticketName != "" {
+		return d.getManuallyClaimedTicket(ctx, pod.Namespace, ticketName)
+	}
+
+	// Check for specific ticket request
 	if ticketName := annotations[TicketRequestAnnotation]; ticketName != "" {
 		return d.getSpecificTicket(ctx, pod.Namespace, ticketName)
 	}
@@ -156,6 +163,22 @@ func (d *PodCustomDefaulter) findAvailableTicket(ctx context.Context, pod *corev
 	}
 
 	return nil, nil
+}
+
+// getManuallyClaimedTicket handles manually claimed tickets
+func (d *PodCustomDefaulter) getManuallyClaimedTicket(ctx context.Context, namespace, ticketName string) (*corev1alpha1.Ticket, error) {
+	ticket := &corev1alpha1.Ticket{}
+	if err := d.Client.Get(ctx, client.ObjectKey{Name: ticketName, Namespace: namespace}, ticket); err != nil {
+		return nil, fmt.Errorf("manually claimed ticket %s not found: %w", ticketName, err)
+	}
+
+	// For manually claimed tickets, we need to validate they are in reserved state
+	// and then mark them as claimed without changing the pod's node assignment
+	if ticket.Status.Phase != corev1alpha1.TicketReserved {
+		return nil, fmt.Errorf("manually claimed ticket %s is not in reserved state (current: %s)", ticketName, ticket.Status.Phase)
+	}
+
+	return ticket, nil
 }
 
 // getSpecificTicket gets a specific ticket by name
@@ -273,16 +296,26 @@ func (d *PodCustomDefaulter) checkAffinityCompatibility(pod *corev1.Pod, ticket 
 
 // bindPodToTicket binds the pod to the ticket
 func (d *PodCustomDefaulter) bindPodToTicket(ctx context.Context, pod *corev1.Pod, ticket *corev1alpha1.Ticket) error {
-	// Set pod node name to match ticket's node
-	if ticket.Status.NodeName != nil {
-		pod.Spec.NodeName = *ticket.Status.NodeName
-	}
-
-	// Add annotations to track the binding
+	// Initialize annotations if not present
 	if pod.Annotations == nil {
 		pod.Annotations = make(map[string]string)
 	}
-	pod.Annotations[TicketClaimedAnnotation] = ticket.Name
+
+	// Check if this is a manual claim (pod already has ticket-claimed annotation)
+	isManualClaim := pod.Annotations[TicketClaimedAnnotation] != ""
+
+	if !isManualClaim {
+		// For automatic binding, set pod node name to match ticket's node
+		if ticket.Status.NodeName != nil {
+			pod.Spec.NodeName = *ticket.Status.NodeName
+		}
+		// Clear request annotations and add claimed annotation
+		delete(pod.Annotations, TicketRequestAnnotation)
+		delete(pod.Annotations, OrderRequestAnnotation)
+		pod.Annotations[TicketClaimedAnnotation] = ticket.Name
+	}
+
+	// Always add node annotation if ticket has a node
 	if ticket.Status.NodeName != nil {
 		pod.Annotations[TicketNodeAnnotation] = *ticket.Status.NodeName
 	}
@@ -290,12 +323,18 @@ func (d *PodCustomDefaulter) bindPodToTicket(ctx context.Context, pod *corev1.Po
 	// Update ticket status to claimed
 	ticket.Status.Phase = corev1alpha1.TicketClaimed
 	ticket.Status.ClaimedTime = &metav1.Time{Time: metav1.Now().Time}
+	claimedPodName := fmt.Sprintf("%s/%s", pod.Namespace, pod.Name)
+	ticket.Status.ClaimedPod = &claimedPodName
 
 	if err := d.Client.Status().Update(ctx, ticket); err != nil {
 		return fmt.Errorf("failed to update ticket status: %w", err)
 	}
 
-	podlog.Info("Pod bound to ticket", "pod", pod.Name, "ticket", ticket.Name, "node", ticket.Status.NodeName)
+	bindingType := "automatic"
+	if isManualClaim {
+		bindingType = "manual"
+	}
+	podlog.Info("Pod bound to ticket", "pod", pod.Name, "ticket", ticket.Name, "node", ticket.Status.NodeName, "binding", bindingType)
 	return nil
 }
 
@@ -410,9 +449,27 @@ func (v *PodCustomValidator) validateTicketAnnotations(ctx context.Context, pod 
 		}
 	}
 
+	// Validate manual ticket claim
+	if ticketName := annotations[TicketClaimedAnnotation]; ticketName != "" {
+		if err := v.validateTicketExists(ctx, pod.Namespace, ticketName); err != nil {
+			warnings = append(warnings, fmt.Sprintf("Manually claimed ticket %s may not be available: %v", ticketName, err))
+		}
+	}
+
 	// Check for conflicting annotations
-	if annotations[TicketRequestAnnotation] != "" && annotations[OrderRequestAnnotation] != "" {
-		return warnings, fmt.Errorf("pod cannot request both specific ticket and order at the same time")
+	conflictCount := 0
+	if annotations[TicketRequestAnnotation] != "" {
+		conflictCount++
+	}
+	if annotations[OrderRequestAnnotation] != "" {
+		conflictCount++
+	}
+	if annotations[TicketClaimedAnnotation] != "" {
+		conflictCount++
+	}
+
+	if conflictCount > 1 {
+		return warnings, fmt.Errorf("pod can only have one of: ticket-request, order-request, or ticket-claimed annotations")
 	}
 
 	return warnings, nil

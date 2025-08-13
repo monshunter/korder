@@ -137,7 +137,7 @@ var _ = Describe("Basic Workflow Integration Test", func() {
 					Name:      "test-business-pod",
 					Namespace: namespace,
 					Annotations: map[string]string{
-						"korder.dev/require-ticket": "true",
+						"korder.dev/order-request": "test-order",
 					},
 				},
 				Spec: corev1.PodSpec{

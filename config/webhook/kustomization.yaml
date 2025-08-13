@@ -2,5 +2,15 @@ resources:
 - manifests.yaml
 - service.yaml
 
+patches:
+- path: pod-webhook-patch.yaml
+  target:
+    kind: MutatingWebhookConfiguration
+    name: mutating-webhook-configuration
+- path: validating-webhook-patch.yaml
+  target:
+    kind: ValidatingWebhookConfiguration
+    name: validating-webhook-configuration
+
 configurations:
 - kustomizeconfig.yaml

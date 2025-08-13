@@ -69,9 +69,15 @@ The system implements a resource reservation pattern where:
 ### Configuration Structure
 - `config/crd/` - Custom Resource Definitions
 - `config/rbac/` - Role-based access control
-- `config/webhook/` - Webhook configurations
+- `config/webhook/` - Webhook configurations with CEL-based filtering
 - `config/manager/` - Controller deployment manifests
 - `config/default/` - Kustomize overlay for complete deployment
+
+### Webhook Configuration
+The Pod webhooks use CEL expressions and namespace selectors for precise filtering:
+- **CEL Filtering**: Only intercepts Pods with korder annotations (`ticket-request`, `order-request`, `ticket-claimed`)
+- **Namespace Filtering**: Excludes system namespaces (kube-system, kube-public, kube-node-lease, korder-system)
+- **Automatic Patching**: Uses Kustomize patches in `config/webhook/pod-webhook-patch.yaml` and `validating-webhook-patch.yaml`
 
 ## Quota System
 
