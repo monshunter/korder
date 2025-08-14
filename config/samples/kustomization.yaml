@@ -3,4 +3,6 @@ resources:
 - core_v1alpha1_order.yaml
 - core_v1alpha1_ticket.yaml
 - core_v1alpha1_quota.yaml
+- core_v1alpha1_daemonorder.yaml
+- core_v1alpha1_cronorder.yaml
 # +kubebuilder:scaffold:manifestskustomizesamples

@@ -979,9 +979,6 @@ spec:
                         x-kubernetes-list-type: atomic
                     type: object
                 type: object
-              duration:
-                description: Duration defines how long the ticket is valid
-                type: string
               lifecycle:
                 description: Lifecycle defines lifecycle policies
                 properties:
@@ -1071,12 +1068,6 @@ spec:
                 type: object
               schedulerName:
                 description: SchedulerName defines which scheduler to use
-                type: string
-              startTime:
-                description: |-
-                  StartTime defines when the ticket becomes active
-                  Format: RFC3339
-                format: date-time
                 type: string
               tolerations:
                 description: Tolerations for the guardian pods
@@ -1291,6 +1282,21 @@ spec:
                   - whenUnsatisfiable
                   type: object
                 type: array
+              window:
+                description: Window defines the time window for ticket validity
+                properties:
+                  duration:
+                    description: Duration defines how long the ticket is valid
+                    type: string
+                  startTime:
+                    description: |-
+                      StartTime defines when the ticket becomes active
+                      Format: RFC3339
+                    type: string
+                  timeZone:
+                    description: TimeZone defines the timezone for the start time
+                    type: string
+                type: object
             type: object
           status:
             description: status defines the observed state of Ticket

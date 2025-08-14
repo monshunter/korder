@@ -5,6 +5,8 @@ resources:
 - bases/core.korder.dev_orders.yaml
 - bases/core.korder.dev_tickets.yaml
 - bases/core.korder.dev_quotas.yaml
+- bases/core.korder.dev_cronorders.yaml
+- bases/core.korder.dev_daemonorders.yaml
 # +kubebuilder:scaffold:crdkustomizeresource
 
 patches:

@@ -23,7 +23,6 @@ import (
 
 	corev1 "k8s.io/api/core/v1"
 	"k8s.io/apimachinery/pkg/api/resource"
-	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 	"k8s.io/apimachinery/pkg/runtime"
 	ctrl "sigs.k8s.io/controller-runtime"
 	"sigs.k8s.io/controller-runtime/pkg/client"
@@ -81,10 +80,13 @@ func (d *TicketCustomDefaulter) Default(ctx context.Context, obj runtime.Object)
 		ticket.Spec.Lifecycle.TTLSecondsAfterFinished = &defaultTTL
 	}
 
-	// Set default duration if not specified
-	if ticket.Spec.Duration == nil {
-		defaultDuration := metav1.Duration{Duration: time.Hour * 24} // 24 hours default
-		ticket.Spec.Duration = &defaultDuration
+	// Set default window duration if not specified
+	if ticket.Spec.Window == nil {
+		ticket.Spec.Window = &corev1alpha1.WindowSpec{
+			Duration: "24h", // 24 hours default
+		}
+	} else if ticket.Spec.Window.Duration == "" {
+		ticket.Spec.Window.Duration = "24h"
 	}
 
 	// Set default scheduler name
@@ -103,7 +105,7 @@ func (d *TicketCustomDefaulter) Default(ctx context.Context, obj runtime.Object)
 		}
 	}
 
-	ticketlog.V(1).Info("Applied defaults to Ticket", "name", ticket.Name, "duration", ticket.Spec.Duration)
+	ticketlog.V(1).Info("Applied defaults to Ticket", "name", ticket.Name, "duration", ticket.Spec.Window.Duration)
 	return nil
 }
 
@@ -180,14 +182,25 @@ func (v *TicketCustomValidator) ValidateUpdate(ctx context.Context, oldObj, newO
 func (v *TicketCustomValidator) validateTicketSpec(ticket *corev1alpha1.Ticket) (admission.Warnings, error) {
 	var warnings admission.Warnings
 
-	// Validate duration
-	if ticket.Spec.Duration != nil && ticket.Spec.Duration.Duration <= 0 {
-		return warnings, fmt.Errorf("duration must be positive")
-	}
+	// Validate window
+	if ticket.Spec.Window != nil {
+		// Validate duration format
+		if ticket.Spec.Window.Duration != "" {
+			if duration, err := time.ParseDuration(ticket.Spec.Window.Duration); err != nil {
+				return warnings, fmt.Errorf("invalid window duration format: %w", err)
+			} else if duration <= 0 {
+				return warnings, fmt.Errorf("window duration must be positive")
+			}
+		}
 
-	// Validate start time
-	if ticket.Spec.StartTime != nil && ticket.Spec.StartTime.Before(&metav1.Time{Time: time.Now()}) {
-		warnings = append(warnings, "Start time is in the past")
+		// Validate start time format if specified
+		if ticket.Spec.Window.StartTime != nil && *ticket.Spec.Window.StartTime != "" {
+			if startTime, err := time.Parse(time.RFC3339, *ticket.Spec.Window.StartTime); err != nil {
+				return warnings, fmt.Errorf("invalid start time format, must be RFC3339: %w", err)
+			} else if startTime.Before(time.Now()) {
+				warnings = append(warnings, "Start time is in the past")
+			}
+		}
 	}
 
 	// Validate lifecycle policy
@@ -245,10 +258,10 @@ func (v *TicketCustomValidator) validateTicketResources(resources *corev1.Resour
 func (v *TicketCustomValidator) validateTicketImmutableFields(oldTicket, newTicket *corev1alpha1.Ticket) (admission.Warnings, error) {
 	var warnings admission.Warnings
 
-	// Duration should be immutable after creation (to avoid confusion with guardian pods)
-	if oldTicket.Spec.Duration != nil && newTicket.Spec.Duration != nil {
-		if oldTicket.Spec.Duration.Duration != newTicket.Spec.Duration.Duration {
-			warnings = append(warnings, "Changing duration may not affect existing guardian pods")
+	// Window duration should be immutable after creation (to avoid confusion with guardian pods)
+	if oldTicket.Spec.Window != nil && newTicket.Spec.Window != nil {
+		if oldTicket.Spec.Window.Duration != newTicket.Spec.Window.Duration {
+			warnings = append(warnings, "Changing window duration may not affect existing guardian pods")
 		}
 	}
 

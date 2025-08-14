@@ -21,17 +21,7 @@ import (
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 )
 
-// StrategyType defines the merge strategy for Order
-type StrategyType string
-
-const (
-	// OneTimeStrategy creates tickets once
-	OneTimeStrategy StrategyType = "OneTime"
-	// ScheduledStrategy creates tickets at scheduled time
-	ScheduledStrategy StrategyType = "Scheduled"
-	// RecurringStrategy creates tickets repeatedly
-	RecurringStrategy StrategyType = "Recurring"
-)
+// Removed StrategyType - using simpler declarative approach
 
 // RefreshPolicy defines when tickets should be refreshed
 type RefreshPolicy string
@@ -67,21 +57,7 @@ type TicketLifecycle struct {
 	CleanupPolicy CleanupPolicy `json:"cleanupPolicy,omitempty"`
 }
 
-// OrderStrategy defines how tickets are created and managed
-type OrderStrategy struct {
-	// Type defines the strategy type
-	// +kubebuilder:validation:Enum=OneTime;Scheduled;Recurring
-	Type StrategyType `json:"type"`
-
-	// Schedule defines cron expression for Scheduled/Recurring strategies
-	// +optional
-	Schedule *string `json:"schedule,omitempty"`
-
-	// RefreshPolicy defines when to refresh tickets
-	// +kubebuilder:validation:Enum=Always;OnClaim;Never
-	// +kubebuilder:default=OnClaim
-	RefreshPolicy RefreshPolicy `json:"refreshPolicy,omitempty"`
-}
+// Removed OrderStrategy - using simpler declarative approach
 
 // TicketTemplate defines the template for creating tickets
 type TicketTemplate struct {
@@ -93,19 +69,30 @@ type TicketTemplate struct {
 	Spec TicketTemplateSpec `json:"spec"`
 }
 
+// WindowSpec defines the time window for ticket validity
+type WindowSpec struct {
+	// StartTime defines when the ticket becomes active
+	// Format: RFC3339
+	// +optional
+	StartTime *string `json:"startTime,omitempty"`
+
+	// TimeZone defines the timezone for the start time
+	// +optional
+	TimeZone *string `json:"timeZone,omitempty"`
+
+	// Duration defines how long the ticket is valid
+	Duration string `json:"duration,omitempty"`
+}
+
 // TicketTemplateSpec defines the specification part of ticket template
 type TicketTemplateSpec struct {
 	// Lifecycle defines lifecycle policies
 	// +optional
 	Lifecycle *TicketLifecycle `json:"lifecycle,omitempty"`
 
-	// StartTime defines when the ticket becomes active
-	// Format: RFC3339
+	// Window defines the time window for ticket validity
 	// +optional
-	StartTime *metav1.Time `json:"startTime,omitempty"`
-
-	// Duration defines how long the ticket is valid
-	Duration *metav1.Duration `json:"duration,omitempty"`
+	Window *WindowSpec `json:"window,omitempty"`
 
 	// SchedulerName defines which scheduler to use
 	// +optional
@@ -147,19 +134,20 @@ type OrderSpec struct {
 	Paused *bool `json:"paused,omitempty"`
 
 	// Replicas defines the number of tickets to create
-	// When DaemonSet is true, this field is ignored and one ticket per eligible node is created
 	// +kubebuilder:validation:Minimum=0
 	// +kubebuilder:default=1
 	Replicas *int32 `json:"replicas,omitempty"`
 
-	// DaemonSet indicates whether to create one ticket per eligible node
-	// When true, replicas field is ignored and the system automatically creates
-	// one ticket for each node that matches the nodeSelector and tolerations
-	// +optional
-	DaemonSet *bool `json:"daemonSet,omitempty"`
+	// RefreshPolicy defines when to refresh tickets
+	// +kubebuilder:validation:Enum=Always;OnClaim;Never
+	// +kubebuilder:default=OnClaim
+	RefreshPolicy RefreshPolicy `json:"refreshPolicy,omitempty"`
 
-	// Strategy defines how tickets are created and managed
-	Strategy OrderStrategy `json:"strategy"`
+	// MinReadySeconds is the minimum number of seconds for which a newly created ticket should
+	// be ready without any of its containers crashing, for it to be considered available
+	// +kubebuilder:validation:Minimum=0
+	// +kubebuilder:default=0
+	MinReadySeconds *int32 `json:"minReadySeconds,omitempty"`
 
 	// Selector for tickets created by this order
 	// +optional

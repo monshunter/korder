@@ -27,8 +27,8 @@ type TicketPhase string
 const (
 	// TicketPending means the ticket is waiting to be activated
 	TicketPending TicketPhase = "Pending"
-	// TicketReserved means the ticket is reserved and guardian pod is running
-	TicketReserved TicketPhase = "Reserved"
+	// TicketReady means the ticket is ready and guardian pod is running
+	TicketReady TicketPhase = "Ready"
 	// TicketClaimed means the ticket is claimed by a business pod
 	TicketClaimed TicketPhase = "Claimed"
 	// TicketExpired means the ticket has expired
@@ -41,13 +41,9 @@ type TicketSpec struct {
 	// +optional
 	Lifecycle *TicketLifecycle `json:"lifecycle,omitempty"`
 
-	// StartTime defines when the ticket becomes active
-	// Format: RFC3339
+	// Window defines the time window for ticket validity
 	// +optional
-	StartTime *metav1.Time `json:"startTime,omitempty"`
-
-	// Duration defines how long the ticket is valid
-	Duration *metav1.Duration `json:"duration,omitempty"`
+	Window *WindowSpec `json:"window,omitempty"`
 
 	// SchedulerName defines which scheduler to use
 	// +optional
@@ -86,8 +82,8 @@ type TicketSpec struct {
 type TicketConditionType string
 
 const (
-	// TicketReady indicates the ticket is ready
-	TicketReady TicketConditionType = "Ready"
+	// TicketReadyCondition indicates the ticket is ready
+	TicketReadyCondition TicketConditionType = "Ready"
 	// TicketGuardianReady indicates the guardian pod is ready
 	TicketGuardianReady TicketConditionType = "GuardianReady"
 	// TicketExpiring indicates the ticket is about to expire

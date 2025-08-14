@@ -1,0 +1,32 @@
+apiVersion: core.korder.dev/v1alpha1
+kind: CronOrder
+metadata:
+  labels:
+    app.kubernetes.io/name: korder
+    app.kubernetes.io/managed-by: kustomize
+  name: cronorder-sample
+spec:
+  schedule: "0 9 * * 1-5"  # Weekdays at 9 AM
+  concurrencyPolicy: Forbid
+  successfulJobsHistoryLimit: 3
+  failedJobsHistoryLimit: 1
+  orderTemplate:
+    metadata:
+      labels:
+        app: scheduled-worker
+    spec:
+      replicas: 2
+      template:
+        metadata:
+          labels:
+            app: scheduled-worker
+        spec:
+          window:
+            duration: "8h"
+          resources:
+            requests:
+              cpu: "200m"
+              memory: "256Mi"
+          lifecycle:
+            cleanupPolicy: Delete
+            ttlSecondsAfterFinished: 3600

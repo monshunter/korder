@@ -19,6 +19,7 @@ package v1
 import (
 	"context"
 	"fmt"
+	"strings"
 
 	corev1 "k8s.io/api/core/v1"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
@@ -152,17 +153,74 @@ func (d *PodCustomDefaulter) findAvailableTicket(ctx context.Context, pod *corev
 		return d.getManuallyClaimedTicket(ctx, pod.Namespace, ticketName)
 	}
 
-	// Check for specific ticket request
-	if ticketName := annotations[TicketRequestAnnotation]; ticketName != "" {
-		return d.getSpecificTicket(ctx, pod.Namespace, ticketName)
+	// Check for ticket request with new format
+	if ticketRequest := annotations[TicketRequestAnnotation]; ticketRequest != "" {
+		return d.parseTicketRequest(ctx, pod, ticketRequest)
 	}
 
-	// Check for order-based request
+	// Check for order-based request (legacy support)
 	if orderName := annotations[OrderRequestAnnotation]; orderName != "" {
 		return d.findTicketFromOrder(ctx, pod, orderName)
 	}
 
 	return nil, nil
+}
+
+// parseTicketRequest parses the ticket request annotation and finds appropriate ticket
+func (d *PodCustomDefaulter) parseTicketRequest(ctx context.Context, pod *corev1.Pod, ticketRequest string) (*corev1alpha1.Ticket, error) {
+	// Parse the new annotation formats:
+	// "name:ticket-sample" - specific ticket by name
+	// "selector: app=app-name,env=dev" - tickets matching label selector
+	// "group:order-sample" - tickets from specific order
+
+	if strings.HasPrefix(ticketRequest, "name:") {
+		ticketName := strings.TrimSpace(strings.TrimPrefix(ticketRequest, "name:"))
+		return d.getSpecificTicket(ctx, pod.Namespace, ticketName)
+	}
+
+	if strings.HasPrefix(ticketRequest, "selector:") {
+		selectorStr := strings.TrimSpace(strings.TrimPrefix(ticketRequest, "selector:"))
+		return d.findTicketBySelector(ctx, pod, selectorStr)
+	}
+
+	if strings.HasPrefix(ticketRequest, "group:") {
+		orderName := strings.TrimSpace(strings.TrimPrefix(ticketRequest, "group:"))
+		return d.findTicketFromOrder(ctx, pod, orderName)
+	}
+
+	// Fallback to treating it as a direct ticket name for backward compatibility
+	return d.getSpecificTicket(ctx, pod.Namespace, ticketRequest)
+}
+
+// findTicketBySelector finds tickets matching the label selector
+func (d *PodCustomDefaulter) findTicketBySelector(ctx context.Context, pod *corev1.Pod, selectorStr string) (*corev1alpha1.Ticket, error) {
+	// Parse label selector format: "app=app-name,env=dev"
+	labels := make(map[string]string)
+	pairs := strings.Split(selectorStr, ",")
+	for _, pair := range pairs {
+		kv := strings.Split(strings.TrimSpace(pair), "=")
+		if len(kv) == 2 {
+			labels[strings.TrimSpace(kv[0])] = strings.TrimSpace(kv[1])
+		}
+	}
+
+	if len(labels) == 0 {
+		return nil, fmt.Errorf("invalid selector format: %s", selectorStr)
+	}
+
+	// Get tickets matching the labels
+	ticketList := &corev1alpha1.TicketList{}
+	listOpts := []client.ListOption{
+		client.InNamespace(pod.Namespace),
+		client.MatchingLabels(labels),
+	}
+
+	if err := d.Client.List(ctx, ticketList, listOpts...); err != nil {
+		return nil, err
+	}
+
+	// Find the best matching available ticket
+	return d.selectBestTicket(pod, ticketList.Items), nil
 }
 
 // getManuallyClaimedTicket handles manually claimed tickets
@@ -172,10 +230,10 @@ func (d *PodCustomDefaulter) getManuallyClaimedTicket(ctx context.Context, names
 		return nil, fmt.Errorf("manually claimed ticket %s not found: %w", ticketName, err)
 	}
 
-	// For manually claimed tickets, we need to validate they are in reserved state
+	// For manually claimed tickets, we need to validate they are in ready state
 	// and then mark them as claimed without changing the pod's node assignment
-	if ticket.Status.Phase != corev1alpha1.TicketReserved {
-		return nil, fmt.Errorf("manually claimed ticket %s is not in reserved state (current: %s)", ticketName, ticket.Status.Phase)
+	if ticket.Status.Phase != corev1alpha1.TicketReady {
+		return nil, fmt.Errorf("manually claimed ticket %s is not in ready state (current: %s)", ticketName, ticket.Status.Phase)
 	}
 
 	return ticket, nil
@@ -189,7 +247,7 @@ func (d *PodCustomDefaulter) getSpecificTicket(ctx context.Context, namespace, t
 	}
 
 	// Check if ticket is available for claiming
-	if ticket.Status.Phase == corev1alpha1.TicketReserved && ticket.Status.NodeName != nil {
+	if ticket.Status.Phase == corev1alpha1.TicketReady && ticket.Status.NodeName != nil {
 		return ticket, nil
 	}
 
@@ -222,7 +280,7 @@ func (d *PodCustomDefaulter) selectBestTicket(pod *corev1.Pod, tickets []corev1a
 		ticket := &tickets[i]
 
 		// Skip tickets that are not available
-		if ticket.Status.Phase != corev1alpha1.TicketReserved || ticket.Status.NodeName == nil {
+		if ticket.Status.Phase != corev1alpha1.TicketReady || ticket.Status.NodeName == nil {
 			continue
 		}
 
@@ -482,7 +540,7 @@ func (v *PodCustomValidator) validateTicketExists(ctx context.Context, namespace
 		return fmt.Errorf("ticket not found: %w", err)
 	}
 
-	if ticket.Status.Phase != corev1alpha1.TicketReserved {
+	if ticket.Status.Phase != corev1alpha1.TicketReady {
 		return fmt.Errorf("ticket is not in reserved state (current: %s)", ticket.Status.Phase)
 	}
 

@@ -47,6 +47,8 @@ type QuotaReconciler struct {
 // +kubebuilder:rbac:groups=core.korder.dev,resources=quotas/status,verbs=get;update;patch
 // +kubebuilder:rbac:groups=core.korder.dev,resources=quotas/finalizers,verbs=update
 // +kubebuilder:rbac:groups=core.korder.dev,resources=orders,verbs=get;list;watch
+// +kubebuilder:rbac:groups=core.korder.dev,resources=daemonorders,verbs=get;list;watch
+// +kubebuilder:rbac:groups=core.korder.dev,resources=cronorders,verbs=get;list;watch
 // +kubebuilder:rbac:groups=core.korder.dev,resources=tickets,verbs=get;list;watch
 // +kubebuilder:rbac:groups="",resources=namespaces,verbs=get;list;watch
 
@@ -134,15 +136,27 @@ func (r *QuotaReconciler) handleDeletion(ctx context.Context, quota *corev1alpha
 func (r *QuotaReconciler) calculateResourceUsage(ctx context.Context, quota *corev1alpha1.Quota) (corev1.ResourceList, error) {
 	usage := corev1.ResourceList{}
 
-	// Get orders and tickets based on quota scope
-	orders, tickets, err := r.getResourcesInScope(ctx, quota)
+	// Get all order types and tickets based on quota scope
+	orders, daemonOrders, cronOrders, tickets, err := r.getResourcesInScope(ctx, quota)
 	if err != nil {
 		return nil, err
 	}
 
-	// Count orders and tickets
+	// Count all order types
+	totalOrderCount := int64(len(orders) + len(daemonOrders) + len(cronOrders))
+	if totalOrderCount > 0 {
+		usage[corev1.ResourceName("orders")] = *resource.NewQuantity(totalOrderCount, resource.DecimalSI)
+	}
+
+	// Count specific order types if needed
 	if len(orders) > 0 {
-		usage[corev1.ResourceName("orders")] = *resource.NewQuantity(int64(len(orders)), resource.DecimalSI)
+		usage[corev1.ResourceName("orders.regular")] = *resource.NewQuantity(int64(len(orders)), resource.DecimalSI)
+	}
+	if len(daemonOrders) > 0 {
+		usage[corev1.ResourceName("orders.daemon")] = *resource.NewQuantity(int64(len(daemonOrders)), resource.DecimalSI)
+	}
+	if len(cronOrders) > 0 {
+		usage[corev1.ResourceName("orders.cron")] = *resource.NewQuantity(int64(len(cronOrders)), resource.DecimalSI)
 	}
 	if len(tickets) > 0 {
 		usage[corev1.ResourceName("tickets")] = *resource.NewQuantity(int64(len(tickets)), resource.DecimalSI)
@@ -171,9 +185,11 @@ func (r *QuotaReconciler) calculateResourceUsage(ctx context.Context, quota *cor
 	return usage, nil
 }
 
-// getResourcesInScope returns orders and tickets that fall within the quota scope
-func (r *QuotaReconciler) getResourcesInScope(ctx context.Context, quota *corev1alpha1.Quota) ([]corev1alpha1.Order, []corev1alpha1.Ticket, error) {
+// getResourcesInScope returns all order types and tickets that fall within the quota scope
+func (r *QuotaReconciler) getResourcesInScope(ctx context.Context, quota *corev1alpha1.Quota) ([]corev1alpha1.Order, []corev1alpha1.DaemonOrder, []corev1alpha1.CronOrder, []corev1alpha1.Ticket, error) {
 	var orders []corev1alpha1.Order
+	var daemonOrders []corev1alpha1.DaemonOrder
+	var cronOrders []corev1alpha1.CronOrder
 	var tickets []corev1alpha1.Ticket
 
 	switch quota.Spec.Scope.Type {
@@ -181,13 +197,25 @@ func (r *QuotaReconciler) getResourcesInScope(ctx context.Context, quota *corev1
 		// Get all orders and tickets in the cluster
 		orderList := &corev1alpha1.OrderList{}
 		if err := r.List(ctx, orderList); err != nil {
-			return nil, nil, err
+			return nil, nil, nil, nil, err
 		}
 		orders = orderList.Items
 
+		daemonOrderList := &corev1alpha1.DaemonOrderList{}
+		if err := r.List(ctx, daemonOrderList); err != nil {
+			return nil, nil, nil, nil, err
+		}
+		daemonOrders = daemonOrderList.Items
+
+		cronOrderList := &corev1alpha1.CronOrderList{}
+		if err := r.List(ctx, cronOrderList); err != nil {
+			return nil, nil, nil, nil, err
+		}
+		cronOrders = cronOrderList.Items
+
 		ticketList := &corev1alpha1.TicketList{}
 		if err := r.List(ctx, ticketList); err != nil {
-			return nil, nil, err
+			return nil, nil, nil, nil, err
 		}
 		tickets = ticketList.Items
 
@@ -196,13 +224,25 @@ func (r *QuotaReconciler) getResourcesInScope(ctx context.Context, quota *corev1
 		for _, ns := range quota.Spec.Scope.Namespaces {
 			orderList := &corev1alpha1.OrderList{}
 			if err := r.List(ctx, orderList, client.InNamespace(ns)); err != nil {
-				return nil, nil, err
+				return nil, nil, nil, nil, err
 			}
 			orders = append(orders, orderList.Items...)
 
+			daemonOrderList := &corev1alpha1.DaemonOrderList{}
+			if err := r.List(ctx, daemonOrderList, client.InNamespace(ns)); err != nil {
+				return nil, nil, nil, nil, err
+			}
+			daemonOrders = append(daemonOrders, daemonOrderList.Items...)
+
+			cronOrderList := &corev1alpha1.CronOrderList{}
+			if err := r.List(ctx, cronOrderList, client.InNamespace(ns)); err != nil {
+				return nil, nil, nil, nil, err
+			}
+			cronOrders = append(cronOrders, cronOrderList.Items...)
+
 			ticketList := &corev1alpha1.TicketList{}
 			if err := r.List(ctx, ticketList, client.InNamespace(ns)); err != nil {
-				return nil, nil, err
+				return nil, nil, nil, nil, err
 			}
 			tickets = append(tickets, ticketList.Items...)
 		}
@@ -211,19 +251,31 @@ func (r *QuotaReconciler) getResourcesInScope(ctx context.Context, quota *corev1
 		// Get namespaces matching selector
 		namespaces, err := r.getNamespacesMatchingSelector(ctx, quota.Spec.Scope.NamespaceSelector)
 		if err != nil {
-			return nil, nil, err
+			return nil, nil, nil, nil, err
 		}
 
 		for _, ns := range namespaces {
 			orderList := &corev1alpha1.OrderList{}
 			if err := r.List(ctx, orderList, client.InNamespace(ns.Name)); err != nil {
-				return nil, nil, err
+				return nil, nil, nil, nil, err
 			}
 			orders = append(orders, orderList.Items...)
 
+			daemonOrderList := &corev1alpha1.DaemonOrderList{}
+			if err := r.List(ctx, daemonOrderList, client.InNamespace(ns.Name)); err != nil {
+				return nil, nil, nil, nil, err
+			}
+			daemonOrders = append(daemonOrders, daemonOrderList.Items...)
+
+			cronOrderList := &corev1alpha1.CronOrderList{}
+			if err := r.List(ctx, cronOrderList, client.InNamespace(ns.Name)); err != nil {
+				return nil, nil, nil, nil, err
+			}
+			cronOrders = append(cronOrders, cronOrderList.Items...)
+
 			ticketList := &corev1alpha1.TicketList{}
 			if err := r.List(ctx, ticketList, client.InNamespace(ns.Name)); err != nil {
-				return nil, nil, err
+				return nil, nil, nil, nil, err
 			}
 			tickets = append(tickets, ticketList.Items...)
 		}
@@ -233,24 +285,36 @@ func (r *QuotaReconciler) getResourcesInScope(ctx context.Context, quota *corev1
 		if quota.Spec.Scope.ObjectSelector != nil {
 			selector, err := metav1.LabelSelectorAsSelector(quota.Spec.Scope.ObjectSelector)
 			if err != nil {
-				return nil, nil, err
+				return nil, nil, nil, nil, err
 			}
 
 			orderList := &corev1alpha1.OrderList{}
 			if err := r.List(ctx, orderList, client.MatchingLabelsSelector{Selector: selector}); err != nil {
-				return nil, nil, err
+				return nil, nil, nil, nil, err
 			}
 			orders = orderList.Items
 
+			daemonOrderList := &corev1alpha1.DaemonOrderList{}
+			if err := r.List(ctx, daemonOrderList, client.MatchingLabelsSelector{Selector: selector}); err != nil {
+				return nil, nil, nil, nil, err
+			}
+			daemonOrders = daemonOrderList.Items
+
+			cronOrderList := &corev1alpha1.CronOrderList{}
+			if err := r.List(ctx, cronOrderList, client.MatchingLabelsSelector{Selector: selector}); err != nil {
+				return nil, nil, nil, nil, err
+			}
+			cronOrders = cronOrderList.Items
+
 			ticketList := &corev1alpha1.TicketList{}
 			if err := r.List(ctx, ticketList, client.MatchingLabelsSelector{Selector: selector}); err != nil {
-				return nil, nil, err
+				return nil, nil, nil, nil, err
 			}
 			tickets = ticketList.Items
 		}
 	}
 
-	return orders, tickets, nil
+	return orders, daemonOrders, cronOrders, tickets, nil
 }
 
 // getNamespacesMatchingSelector returns namespaces matching the label selector

@@ -23,7 +23,6 @@ import (
 
 	corev1 "k8s.io/api/core/v1"
 	"k8s.io/apimachinery/pkg/api/resource"
-	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 	"k8s.io/apimachinery/pkg/runtime"
 	ctrl "sigs.k8s.io/controller-runtime"
 	"sigs.k8s.io/controller-runtime/pkg/client"
@@ -80,9 +79,15 @@ func (d *OrderCustomDefaulter) Default(ctx context.Context, obj runtime.Object) 
 		order.Spec.Paused = &defaultPaused
 	}
 
-	// Set default strategy refresh policy
-	if order.Spec.Strategy.RefreshPolicy == "" {
-		order.Spec.Strategy.RefreshPolicy = corev1alpha1.OnClaimRefresh
+	// Set default refresh policy
+	if order.Spec.RefreshPolicy == "" {
+		order.Spec.RefreshPolicy = corev1alpha1.OnClaimRefresh
+	}
+
+	// Set default minReadySeconds
+	if order.Spec.MinReadySeconds == nil {
+		defaultMinReadySeconds := int32(0)
+		order.Spec.MinReadySeconds = &defaultMinReadySeconds
 	}
 
 	// Set default ticket template values
@@ -101,10 +106,13 @@ func (d *OrderCustomDefaulter) Default(ctx context.Context, obj runtime.Object) 
 
 // setTicketTemplateDefaults sets default values for ticket template
 func (d *OrderCustomDefaulter) setTicketTemplateDefaults(template *corev1alpha1.TicketTemplate) {
-	// Set default duration if not specified
-	if template.Spec.Duration == nil {
-		defaultDuration := metav1.Duration{Duration: time.Hour * 24} // 24 hours default
-		template.Spec.Duration = &defaultDuration
+	// Set default window duration if not specified
+	if template.Spec.Window == nil {
+		template.Spec.Window = &corev1alpha1.WindowSpec{
+			Duration: "24h", // 24 hours default
+		}
+	} else if template.Spec.Window.Duration == "" {
+		template.Spec.Window.Duration = "24h"
 	}
 
 	// Set default lifecycle policy
@@ -207,9 +215,9 @@ func (v *OrderCustomValidator) validateOrderSpec(order *corev1alpha1.Order) (adm
 		warnings = append(warnings, "High replica count may impact cluster performance")
 	}
 
-	// Validate strategy
-	if err := v.validateStrategy(&order.Spec.Strategy); err != nil {
-		return warnings, fmt.Errorf("strategy validation failed: %w", err)
+	// Validate minReadySeconds
+	if order.Spec.MinReadySeconds != nil && *order.Spec.MinReadySeconds < 0 {
+		return warnings, fmt.Errorf("minReadySeconds cannot be negative")
 	}
 
 	// Validate ticket template
@@ -225,38 +233,25 @@ func (v *OrderCustomValidator) validateOrderSpec(order *corev1alpha1.Order) (adm
 	return warnings, nil
 }
 
-// validateStrategy validates the order strategy
-func (v *OrderCustomValidator) validateStrategy(strategy *corev1alpha1.OrderStrategy) error {
-	// Validate strategy type
-	switch strategy.Type {
-	case corev1alpha1.OneTimeStrategy:
-		// OneTime strategy should not have schedule
-		if strategy.Schedule != nil && *strategy.Schedule != "" {
-			return fmt.Errorf("OneTime strategy should not have schedule")
-		}
-	case corev1alpha1.ScheduledStrategy, corev1alpha1.RecurringStrategy:
-		// Scheduled/Recurring strategies should have schedule
-		if strategy.Schedule == nil || *strategy.Schedule == "" {
-			return fmt.Errorf("%s strategy requires schedule", strategy.Type)
-		}
-		// TODO: Validate cron expression format
-	default:
-		return fmt.Errorf("unknown strategy type: %s", strategy.Type)
-	}
-
-	return nil
-}
+// Removed strategy validation - using simple declarative approach
 
 // validateTicketTemplate validates the ticket template
 func (v *OrderCustomValidator) validateTicketTemplate(template *corev1alpha1.TicketTemplate) error {
-	// Validate duration
-	if template.Spec.Duration != nil && template.Spec.Duration.Duration <= 0 {
-		return fmt.Errorf("duration must be positive")
-	}
+	// Validate window
+	if template.Spec.Window != nil {
+		// Validate duration format
+		if template.Spec.Window.Duration != "" {
+			if _, err := time.ParseDuration(template.Spec.Window.Duration); err != nil {
+				return fmt.Errorf("invalid window duration format: %w", err)
+			}
+		}
 
-	// Validate start time
-	if template.Spec.StartTime != nil && template.Spec.StartTime.Before(&metav1.Time{Time: time.Now()}) {
-		return fmt.Errorf("start time cannot be in the past")
+		// Validate start time format if specified
+		if template.Spec.Window.StartTime != nil && *template.Spec.Window.StartTime != "" {
+			if _, err := time.Parse(time.RFC3339, *template.Spec.Window.StartTime); err != nil {
+				return fmt.Errorf("invalid start time format, must be RFC3339: %w", err)
+			}
+		}
 	}
 
 	// Validate lifecycle policy
@@ -296,17 +291,17 @@ func (v *OrderCustomValidator) validateResources(resources *corev1.ResourceRequi
 func (v *OrderCustomValidator) validateImmutableFields(oldOrder, newOrder *corev1alpha1.Order) (admission.Warnings, error) {
 	var warnings admission.Warnings
 
-	// Strategy type is immutable after creation
-	if oldOrder.Spec.Strategy.Type != newOrder.Spec.Strategy.Type {
-		return warnings, fmt.Errorf("strategy type is immutable")
-	}
-
 	// Template selector fields should be immutable
 	if oldOrder.Spec.Selector != nil && newOrder.Spec.Selector != nil {
 		// This is a simplified check - in practice, you might want more sophisticated validation
 		if len(oldOrder.Spec.Selector.MatchLabels) != len(newOrder.Spec.Selector.MatchLabels) {
 			warnings = append(warnings, "Changing selector may affect existing tickets")
 		}
+	}
+
+	// RefreshPolicy changes should be warned about
+	if oldOrder.Spec.RefreshPolicy != newOrder.Spec.RefreshPolicy {
+		warnings = append(warnings, "Changing refresh policy may affect existing ticket lifecycle")
 	}
 
 	return warnings, nil
@@ -558,7 +553,7 @@ func (v *OrderCustomValidator) validateOrderDeletion(ctx context.Context, order 
 	claimedTickets := 0
 	for _, ticket := range ticketList.Items {
 		switch ticket.Status.Phase {
-		case corev1alpha1.TicketReserved:
+		case corev1alpha1.TicketReady:
 			activeTickets++
 		case corev1alpha1.TicketClaimed:
 			claimedTickets++

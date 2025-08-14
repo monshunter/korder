@@ -25,24 +25,19 @@ import (
 	apierrors "k8s.io/apimachinery/pkg/api/errors"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 	"k8s.io/apimachinery/pkg/runtime"
-	"k8s.io/apimachinery/pkg/types"
 	ctrl "sigs.k8s.io/controller-runtime"
 	"sigs.k8s.io/controller-runtime/pkg/client"
 	"sigs.k8s.io/controller-runtime/pkg/controller/controllerutil"
-	"sigs.k8s.io/controller-runtime/pkg/handler"
 	logf "sigs.k8s.io/controller-runtime/pkg/log"
-	"sigs.k8s.io/controller-runtime/pkg/reconcile"
 
 	corev1alpha1 "github.com/monshunter/korder/api/v1alpha1"
 	"github.com/monshunter/korder/internal/metrics"
-	"github.com/monshunter/korder/internal/scheduler"
 )
 
 // OrderReconciler reconciles a Order object
 type OrderReconciler struct {
 	client.Client
-	Scheme        *runtime.Scheme
-	CronScheduler *scheduler.CronScheduler
+	Scheme *runtime.Scheme
 }
 
 // +kubebuilder:rbac:groups=core.korder.dev,resources=orders,verbs=get;list;watch;create;update;patch;delete
@@ -136,7 +131,7 @@ func (r *OrderReconciler) handleDeletion(ctx context.Context, order *corev1alpha
 	return ctrl.Result{}, nil
 }
 
-// reconcileTickets manages ticket creation and lifecycle based on order strategy
+// reconcileTickets manages ticket creation and lifecycle based on desired replicas
 func (r *OrderReconciler) reconcileTickets(ctx context.Context, order *corev1alpha1.Order) (ctrl.Result, error) {
 	log := logf.FromContext(ctx)
 
@@ -147,228 +142,82 @@ func (r *OrderReconciler) reconcileTickets(ctx context.Context, order *corev1alp
 	}
 
 	// Calculate desired replicas
-	var desiredReplicas int32
-	if order.Spec.DaemonSet != nil && *order.Spec.DaemonSet {
-		// DaemonSet mode: calculate replicas based on eligible nodes
-		eligibleNodes, err := r.getEligibleNodes(ctx, order)
-		if err != nil {
-			log.Error(err, "Failed to get eligible nodes for DaemonSet order")
-			return ctrl.Result{}, err
-		}
-		desiredReplicas = int32(len(eligibleNodes))
-		log.Info("DaemonSet mode: calculated desired replicas based on eligible nodes",
-			"eligibleNodes", len(eligibleNodes), "desiredReplicas", desiredReplicas)
-	} else {
-		// Normal mode: use specified replicas
-		desiredReplicas = int32(1)
-		if order.Spec.Replicas != nil {
-			desiredReplicas = *order.Spec.Replicas
-		}
+	desiredReplicas := int32(1)
+	if order.Spec.Replicas != nil {
+		desiredReplicas = *order.Spec.Replicas
 	}
 
-	// Handle different strategies
-	switch order.Spec.Strategy.Type {
-	case corev1alpha1.OneTimeStrategy:
-		return r.handleOneTimeStrategy(ctx, order, currentTickets, desiredReplicas)
-	case corev1alpha1.ScheduledStrategy:
-		return r.handleScheduledStrategy(ctx, order, currentTickets, desiredReplicas)
-	case corev1alpha1.RecurringStrategy:
-		return r.handleRecurringStrategy(ctx, order, currentTickets, desiredReplicas)
-	default:
-		log.Error(fmt.Errorf("unknown strategy type: %s", order.Spec.Strategy.Type), "Invalid strategy")
-		return ctrl.Result{}, fmt.Errorf("unknown strategy type: %s", order.Spec.Strategy.Type)
-	}
-}
-
-// handleOneTimeStrategy creates tickets once
-func (r *OrderReconciler) handleOneTimeStrategy(ctx context.Context, order *corev1alpha1.Order, currentTickets []corev1alpha1.Ticket, desiredReplicas int32) (ctrl.Result, error) {
-	log := logf.FromContext(ctx)
-
-	// For OneTime strategy, create tickets if they don't exist
+	// Filter active tickets (not expired)
 	activeTickets := filterActiveTickets(currentTickets)
+	currentCount := int32(len(activeTickets))
 
-	if int32(len(activeTickets)) < desiredReplicas {
-		needed := desiredReplicas - int32(len(activeTickets))
+	log.V(1).Info("Reconciling tickets", "desired", desiredReplicas, "current", currentCount)
+
+	if currentCount < desiredReplicas {
+		// Create missing tickets
+		needed := desiredReplicas - currentCount
 		for i := int32(0); i < needed; i++ {
 			if err := r.createTicket(ctx, order, int32(len(currentTickets))+i); err != nil {
 				log.Error(err, "Failed to create ticket")
 				return ctrl.Result{}, err
 			}
 		}
-		log.Info("Created tickets for OneTime strategy", "created", needed)
+		log.Info("Created tickets", "created", needed)
+	} else if currentCount > desiredReplicas {
+		// Handle refresh policy for excess tickets
+		if err := r.handleExcessTickets(ctx, order, activeTickets, desiredReplicas); err != nil {
+			log.Error(err, "Failed to handle excess tickets")
+			return ctrl.Result{}, err
+		}
 	}
 
 	return ctrl.Result{RequeueAfter: time.Minute * 5}, nil
 }
 
-// handleScheduledStrategy creates tickets at scheduled time
-func (r *OrderReconciler) handleScheduledStrategy(ctx context.Context, order *corev1alpha1.Order, currentTickets []corev1alpha1.Ticket, desiredReplicas int32) (ctrl.Result, error) {
+// handleExcessTickets handles tickets when current count exceeds desired count
+func (r *OrderReconciler) handleExcessTickets(ctx context.Context, order *corev1alpha1.Order, activeTickets []corev1alpha1.Ticket, desiredReplicas int32) error {
 	log := logf.FromContext(ctx)
 
-	// Validate schedule
-	if order.Spec.Strategy.Schedule == nil || *order.Spec.Strategy.Schedule == "" {
-		log.Error(fmt.Errorf("schedule required for Scheduled strategy"), "Missing schedule")
-		return ctrl.Result{}, fmt.Errorf("schedule required for Scheduled strategy")
+	excess := int32(len(activeTickets)) - desiredReplicas
+	if excess <= 0 {
+		return nil
 	}
 
-	// Initialize scheduler if not set
-	if r.CronScheduler == nil {
-		r.CronScheduler = scheduler.NewCronScheduler()
-	}
-
-	// Validate the schedule format
-	if err := r.CronScheduler.ValidateSchedule(*order.Spec.Strategy.Schedule); err != nil {
-		log.Error(err, "Invalid schedule format", "schedule", *order.Spec.Strategy.Schedule)
-		return ctrl.Result{}, fmt.Errorf("invalid schedule format: %w", err)
-	}
-
-	// Check if it's time to run
-	isTimeToRun, err := r.CronScheduler.IsTimeToRun(*order.Spec.Strategy.Schedule)
-	if err != nil {
-		log.Error(err, "Failed to check schedule", "schedule", *order.Spec.Strategy.Schedule)
-		return ctrl.Result{}, err
-	}
-
-	if !isTimeToRun {
-		// Calculate next run time for better requeue timing
-		nextRun, err := r.CronScheduler.NextRunTime(*order.Spec.Strategy.Schedule)
-		if err != nil {
-			log.V(1).Info("Failed to calculate next run time, using default requeue", "error", err)
-			return ctrl.Result{RequeueAfter: time.Minute}, nil
-		}
-		requeueAfter := time.Until(nextRun)
-		if requeueAfter <= 0 {
-			requeueAfter = time.Minute
-		}
-		log.V(1).Info("Not time to run, requeuing", "nextRun", nextRun, "requeueAfter", requeueAfter)
-		return ctrl.Result{RequeueAfter: requeueAfter}, nil
-	}
-
-	log.Info("Schedule matched, creating tickets", "schedule", *order.Spec.Strategy.Schedule)
-
-	// Check if tickets already exist for this schedule run
-	// For scheduled strategy, we typically create tickets once per schedule trigger
-	activeTickets := filterActiveTickets(currentTickets)
-	if len(activeTickets) >= int(desiredReplicas) {
-		log.V(1).Info("Sufficient tickets already exist", "active", len(activeTickets), "desired", desiredReplicas)
-		return ctrl.Result{RequeueAfter: time.Minute}, nil
-	}
-
-	// Create missing tickets
-	needed := desiredReplicas - int32(len(activeTickets))
-	for i := int32(0); i < needed; i++ {
-		if err := r.createTicket(ctx, order, int32(len(currentTickets))+i); err != nil {
-			log.Error(err, "Failed to create scheduled ticket")
-			return ctrl.Result{}, err
-		}
-	}
-
-	log.Info("Created scheduled tickets", "created", needed, "schedule", *order.Spec.Strategy.Schedule)
-	return ctrl.Result{RequeueAfter: time.Minute}, nil
-}
-
-// handleRecurringStrategy creates tickets repeatedly
-func (r *OrderReconciler) handleRecurringStrategy(ctx context.Context, order *corev1alpha1.Order, currentTickets []corev1alpha1.Ticket, desiredReplicas int32) (ctrl.Result, error) {
-	log := logf.FromContext(ctx)
-
-	// Validate schedule
-	if order.Spec.Strategy.Schedule == nil || *order.Spec.Strategy.Schedule == "" {
-		log.Error(fmt.Errorf("schedule required for Recurring strategy"), "Missing schedule")
-		return ctrl.Result{}, fmt.Errorf("schedule required for Recurring strategy")
-	}
-
-	// Initialize scheduler if not set
-	if r.CronScheduler == nil {
-		r.CronScheduler = scheduler.NewCronScheduler()
-	}
-
-	// Validate the schedule format
-	if err := r.CronScheduler.ValidateSchedule(*order.Spec.Strategy.Schedule); err != nil {
-		log.Error(err, "Invalid schedule format", "schedule", *order.Spec.Strategy.Schedule)
-		return ctrl.Result{}, fmt.Errorf("invalid schedule format: %w", err)
-	}
-
-	// Check if it's time to run
-	isTimeToRun, err := r.CronScheduler.IsTimeToRun(*order.Spec.Strategy.Schedule)
-	if err != nil {
-		log.Error(err, "Failed to check schedule", "schedule", *order.Spec.Strategy.Schedule)
-		return ctrl.Result{}, err
-	}
-
-	if !isTimeToRun {
-		// For recurring strategy, still maintain desired replica count
-		activeTickets := filterActiveTickets(currentTickets)
-		if int32(len(activeTickets)) < desiredReplicas {
-			needed := desiredReplicas - int32(len(activeTickets))
-			for i := int32(0); i < needed; i++ {
-				if err := r.createTicket(ctx, order, int32(len(currentTickets))+i); err != nil {
-					log.Error(err, "Failed to create recurring ticket")
-					return ctrl.Result{}, err
-				}
-			}
-			log.Info("Created recurring tickets", "created", needed)
-		}
-		return ctrl.Result{RequeueAfter: time.Minute}, nil
-	}
-
-	log.Info("Recurring schedule matched", "schedule", *order.Spec.Strategy.Schedule)
-
-	// For recurring strategy, handle refresh policy
-	switch order.Spec.Strategy.RefreshPolicy {
+	// Handle based on refresh policy
+	switch order.Spec.RefreshPolicy {
 	case corev1alpha1.AlwaysRefresh:
-		// Delete all current tickets and create new ones
-		for _, ticket := range currentTickets {
-			if err := r.Delete(ctx, &ticket); err != nil {
-				log.Error(err, "Failed to delete ticket for refresh", "ticket", ticket.Name)
+		// Delete excess tickets to maintain desired count
+		for i := int32(0); i < excess; i++ {
+			ticket := &activeTickets[len(activeTickets)-1-int(i)]
+			if err := r.Delete(ctx, ticket); err != nil {
+				log.Error(err, "Failed to delete excess ticket", "ticket", ticket.Name)
+				return err
 			}
+			log.Info("Deleted excess ticket", "ticket", ticket.Name)
 		}
-		// Create new tickets
-		for i := int32(0); i < desiredReplicas; i++ {
-			if err := r.createTicket(ctx, order, i); err != nil {
-				log.Error(err, "Failed to create refreshed ticket")
-				return ctrl.Result{}, err
-			}
-		}
-		log.Info("Refreshed all tickets", "count", desiredReplicas)
 	case corev1alpha1.OnClaimRefresh:
-		// Only refresh claimed tickets
-		claimedCount := 0
-		for _, ticket := range currentTickets {
+		// Only delete claimed tickets that are excess
+		deletedCount := int32(0)
+		for i := len(activeTickets) - 1; i >= 0 && deletedCount < excess; i-- {
+			ticket := &activeTickets[i]
 			if ticket.Status.Phase == corev1alpha1.TicketClaimed {
-				if err := r.Delete(ctx, &ticket); err != nil {
+				if err := r.Delete(ctx, ticket); err != nil {
 					log.Error(err, "Failed to delete claimed ticket", "ticket", ticket.Name)
-				} else {
-					claimedCount++
+					return err
 				}
+				log.Info("Deleted claimed ticket", "ticket", ticket.Name)
+				deletedCount++
 			}
-		}
-		// Create replacements for claimed tickets
-		for i := 0; i < claimedCount; i++ {
-			if err := r.createTicket(ctx, order, int32(len(currentTickets))+int32(i)); err != nil {
-				log.Error(err, "Failed to create replacement ticket")
-				return ctrl.Result{}, err
-			}
-		}
-		if claimedCount > 0 {
-			log.Info("Refreshed claimed tickets", "count", claimedCount)
 		}
 	case corev1alpha1.NeverRefresh:
-		// Maintain desired count without refreshing
-		activeTickets := filterActiveTickets(currentTickets)
-		if int32(len(activeTickets)) < desiredReplicas {
-			needed := desiredReplicas - int32(len(activeTickets))
-			for i := int32(0); i < needed; i++ {
-				if err := r.createTicket(ctx, order, int32(len(currentTickets))+i); err != nil {
-					log.Error(err, "Failed to create additional ticket")
-					return ctrl.Result{}, err
-				}
-			}
-			log.Info("Created additional tickets", "created", needed)
-		}
+		// Don't delete any tickets, just log the situation
+		log.Info("Excess tickets detected but refresh policy is Never", "excess", excess)
 	}
 
-	return ctrl.Result{RequeueAfter: time.Minute}, nil
+	return nil
 }
+
+// Removed old strategy handlers - using simple declarative approach
 
 // createTicket creates a new ticket based on the order template
 func (r *OrderReconciler) createTicket(ctx context.Context, order *corev1alpha1.Order, index int32) error {
@@ -382,8 +231,7 @@ func (r *OrderReconciler) createTicket(ctx context.Context, order *corev1alpha1.
 		},
 		Spec: corev1alpha1.TicketSpec{
 			Lifecycle:                 order.Spec.Template.Spec.Lifecycle,
-			StartTime:                 order.Spec.Template.Spec.StartTime,
-			Duration:                  order.Spec.Template.Spec.Duration,
+			Window:                    order.Spec.Template.Spec.Window,
 			SchedulerName:             order.Spec.Template.Spec.SchedulerName,
 			PriorityClassName:         order.Spec.Template.Spec.PriorityClassName,
 			Resources:                 order.Spec.Template.Spec.Resources,
@@ -540,160 +388,13 @@ func (r *OrderReconciler) updateOrderStatus(ctx context.Context, order *corev1al
 	return ctrl.Result{}, nil
 }
 
-// getEligibleNodes returns nodes that are eligible for DaemonSet tickets based on nodeSelector and tolerations
-func (r *OrderReconciler) getEligibleNodes(ctx context.Context, order *corev1alpha1.Order) ([]corev1.Node, error) {
-	log := logf.FromContext(ctx)
-
-	// Get all nodes in the cluster
-	nodeList := &corev1.NodeList{}
-	if err := r.List(ctx, nodeList); err != nil {
-		return nil, fmt.Errorf("failed to list nodes: %w", err)
-	}
-
-	var eligibleNodes []corev1.Node
-
-	for _, node := range nodeList.Items {
-		// Skip nodes that are not ready or schedulable
-		if !r.isNodeReady(&node) || !r.isNodeSchedulable(&node) {
-			log.V(1).Info("Skipping node: not ready or not schedulable", "node", node.Name)
-			continue
-		}
-
-		// Check if node matches nodeSelector from ticket template
-		if !r.nodeMatchesSelector(&node, order.Spec.Template.Spec.NodeSelector) {
-			log.V(1).Info("Skipping node: does not match nodeSelector", "node", node.Name)
-			continue
-		}
-
-		// Check if tolerations allow scheduling on this node
-		if !r.nodeToleratesTicket(&node, order.Spec.Template.Spec.Tolerations) {
-			log.V(1).Info("Skipping node: tolerations do not allow scheduling", "node", node.Name)
-			continue
-		}
-
-		eligibleNodes = append(eligibleNodes, node)
-		log.V(1).Info("Node is eligible for DaemonSet ticket", "node", node.Name)
-	}
-
-	log.Info("Found eligible nodes for DaemonSet order", "total", len(nodeList.Items), "eligible", len(eligibleNodes))
-	return eligibleNodes, nil
-}
-
-// isNodeReady checks if a node is in Ready condition
-func (r *OrderReconciler) isNodeReady(node *corev1.Node) bool {
-	for _, condition := range node.Status.Conditions {
-		if condition.Type == corev1.NodeReady {
-			return condition.Status == corev1.ConditionTrue
-		}
-	}
-	return false
-}
-
-// isNodeSchedulable checks if a node is schedulable (not cordoned)
-func (r *OrderReconciler) isNodeSchedulable(node *corev1.Node) bool {
-	return !node.Spec.Unschedulable
-}
-
-// nodeMatchesSelector checks if a node matches the given nodeSelector
-func (r *OrderReconciler) nodeMatchesSelector(node *corev1.Node, nodeSelector map[string]string) bool {
-	if nodeSelector == nil {
-		return true
-	}
-
-	for key, value := range nodeSelector {
-		if nodeValue, exists := node.Labels[key]; !exists || nodeValue != value {
-			return false
-		}
-	}
-	return true
-}
-
-// nodeToleratesTicket checks if the ticket's tolerations allow it to be scheduled on the node
-func (r *OrderReconciler) nodeToleratesTicket(node *corev1.Node, tolerations []corev1.Toleration) bool {
-	// If no tolerations specified, only schedule on nodes without taints
-	if len(tolerations) == 0 {
-		return len(node.Spec.Taints) == 0
-	}
-
-	// Check each taint on the node
-	for _, taint := range node.Spec.Taints {
-		tolerated := false
-		for _, toleration := range tolerations {
-			if r.tolerationToleratesTaint(&toleration, &taint) {
-				tolerated = true
-				break
-			}
-		}
-		if !tolerated {
-			return false
-		}
-	}
-	return true
-}
-
-// tolerationToleratesTaint checks if a toleration tolerates a specific taint
-func (r *OrderReconciler) tolerationToleratesTaint(toleration *corev1.Toleration, taint *corev1.Taint) bool {
-	// Handle operator Exists
-	if toleration.Operator == corev1.TolerationOpExists {
-		// If key is empty, tolerate all taints
-		if toleration.Key == "" {
-			return true
-		}
-		// If key matches and effect matches (or effect is empty), tolerate
-		return toleration.Key == taint.Key && (toleration.Effect == "" || toleration.Effect == taint.Effect)
-	}
-
-	// Handle operator Equal (default)
-	return toleration.Key == taint.Key &&
-		toleration.Value == taint.Value &&
-		(toleration.Effect == "" || toleration.Effect == taint.Effect)
-}
-
-// findOrdersForNode returns reconcile requests for DaemonSet orders that might be affected by node changes
-func (r *OrderReconciler) findOrdersForNode(ctx context.Context, obj client.Object) []reconcile.Request {
-	node, ok := obj.(*corev1.Node)
-	if !ok {
-		return nil
-	}
-
-	log := logf.FromContext(ctx)
-	log.V(1).Info("Node changed, finding affected DaemonSet orders", "node", node.Name)
-
-	// Get all orders in all namespaces
-	orderList := &corev1alpha1.OrderList{}
-	if err := r.List(ctx, orderList); err != nil {
-		log.Error(err, "Failed to list orders for node change")
-		return nil
-	}
-
-	var requests []reconcile.Request
-	for _, order := range orderList.Items {
-		// Only consider DaemonSet orders
-		if order.Spec.DaemonSet != nil && *order.Spec.DaemonSet {
-			requests = append(requests, reconcile.Request{
-				NamespacedName: types.NamespacedName{
-					Name:      order.Name,
-					Namespace: order.Namespace,
-				},
-			})
-			log.V(1).Info("Enqueuing DaemonSet order for reconciliation due to node change",
-				"order", order.Name, "namespace", order.Namespace, "node", node.Name)
-		}
-	}
-
-	log.V(1).Info("Found DaemonSet orders affected by node change", "count", len(requests), "node", node.Name)
-	return requests
-}
+// Removed DaemonSet-related methods - now handled by DaemonOrder controller
 
 // SetupWithManager sets up the controller with the Manager.
 func (r *OrderReconciler) SetupWithManager(mgr ctrl.Manager) error {
 	return ctrl.NewControllerManagedBy(mgr).
 		For(&corev1alpha1.Order{}).
 		Owns(&corev1alpha1.Ticket{}).
-		Watches(
-			&corev1.Node{},
-			handler.EnqueueRequestsFromMapFunc(r.findOrdersForNode),
-		).
 		Named("order").
 		Complete(r)
 }

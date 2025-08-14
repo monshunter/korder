@@ -2,18 +2,27 @@ apiVersion: core.korder.dev/v1alpha1
 kind: Ticket
 metadata:
   name: ticket-sample
+  labels:
+    korder.dev/order: "order-sample"
+    app: "app-name"
+    env: "dev"
+  annotations:
+    korder.dev/order: "order-sample"
 spec:
   lifecycle:
-    ttlSecondsAfterFinished: 3600  # 完成后保留时间
+    ttlSecondsAfterFinished: 3600 # 完成后保留时间
     cleanupPolicy: "Delete|Retain"
-  startTime: "2023-01-01T00:00:00Z"
-  duration: 3600s
+  window:
+    startTime: "2023-01-01T00:00:00Z"
+    timeZone: ""
+    duration: 3600s
   schedulerName: default-scheduler
   priorityClassName: "priority-class-name"
   # 以下字段全来自PodSpec, 所以应该和PodSpec同名自定保持定义一致
   resources:
-    cpu: 100m
-    memory: 500Mi
+    requests:
+      cpu: 100m
+      memory: 500Mi
   nodeName: "node-1"
   nodeSelector:
     kubernetes.io/arch: amd64
@@ -21,16 +30,16 @@ spec:
     nodeAffinity:
       requiredDuringSchedulingIgnoredDuringExecution:
         nodeSelectorTerms:
-        - matchExpressions:
-          - key: kubernetes.io/arch
-            operator: In
-            values:
-            - amd64
-        - matchExpressions:
-          - key: kubernetes.io/os
-            operator: In
-            values:
-            - linux
+          - matchExpressions:
+              - key: kubernetes.io/arch
+                operator: In
+                values:
+                  - amd64
+          - matchExpressions:
+              - key: kubernetes.io/os
+                operator: In
+                values:
+                  - linux
       preferredDuringSchedulingIgnoredDuringExecution: []
     podAffinity: {}
     podAntiAffinity: {}
@@ -48,21 +57,46 @@ spec:
           app: "app-name"
           env: "dev"
 status:
-# --- 动态状态 ---
-  phase: Reserved  # 状态：Pending -> Reserved -> Claimed -> Expired
-  activationTime: "2024-10-21T10:00:00Z"  # 实际激活时间（由控制器设置）
-  expirationTime: "2024-10-21T12:00:00Z"  # 过期时间（activationTime + duration）
-  claimedTime: "2024-10-21T10:30:00Z"  # 被Claim的时间
-  utilizationRate: 0.8  # 资源利用率
-  nodeName: "node-5"  # 守护者Pod所在的节点（由控制器绑定）
-  guardianPod: "namespace/name"  # 守护者Pod的名称
-  claimedPod: "namespace/name"  # 被Claim的Pod的名称
+  # --- 动态状态 ---
+  phase: Ready # 状态：Pending -> Ready -> Claimed -> Expired
+  activationTime: "2024-10-21T10:00:00Z" # 实际激活时间（由控制器设置）
+  expirationTime: "2024-10-21T12:00:00Z" # 过期时间（activationTime + duration）
+  claimedTime: "2024-10-21T10:30:00Z" # 被Claim的时间
+  utilizationRate: 0.8 # 资源利用率
+  nodeName: "node-5" # 守护者Pod所在的节点（由控制器绑定）
+  guardianPod: "namespace/name" # 守护者Pod的名称
+  claimedPod: "namespace/name" # 被Claim的Pod的名称
   message: "Ticket is ready" # 解释为什么是当前状态的原因（人类可读）
   reason: "TicketReady" # 状态的原因
   # Add observed state of the resource here.
   observedGeneration: 1
   conditions:
-  - type: Ready
-    status: "True"
-    reason: TicketReady
-    message: Ticket is ready
+    - type: Ready
+      status: "True"
+      reason: TicketReady
+      message: Ticket is ready
+
+---
+# Pod 只和Ticket交互，不再感知Order，因为在整个关系链路Order -> Ticket -> Pod 中， Pod其实只需要感知Ticket即可
+# 举例：Pod 如何使用Ticket
+apiVersion: v1
+kind: Pod
+metadata:
+  name: "myapp"
+  namespace: default
+  labels:
+    app: "myapp"
+  annotations:
+    # Pod 通过以下annotation声明需要使用Ticket
+    # use a specific ticket
+    korder.dev/ticket-request: "name:ticket-sample"
+    # or use a label selector to find a ticket
+    # korder.dev/ticket-request: "selector: app=app-name,env=dev"
+    # or use a group name to find a ticket
+    # korder.dev/ticket-request: "group:order-sample"
+
+    # Pod 通过以下 annotation 声明已经使用某个ticket
+    korder.dev/ticket-claimed: "ticket-sample"
+    
+spec:
+  # 

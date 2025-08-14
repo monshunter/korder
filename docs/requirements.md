@@ -15,7 +15,10 @@
 - 通过订单系统，保证系统一直预留足够的资源，以满足突发的业务需求
 ## API关系
 - Quota 限制资源的使用配额, 参考quota.yaml
-- Order 管理 **Ticket的生命周期**, 参考order.yaml
+- Order 管理 **Ticket的生命周期**, 参考order.yaml, daemonOrder.yaml, cronOrder.yaml
+  - Kind: Order 类比Deployment
+  - Kind: DaemonOrder 类比Daemonset
+  - Kind: CronOrder 类比CronJob
 - Ticket 描述资源的属性, 参考ticket.yaml
 - Ticket 会创建并绑定守护者Pod，守护者Pod会一直运行，直到Ticket过期或者被使用
 - 用户通过 Order 声明一组资源的属性和数量，订单系统会根据这些属性和数量，创建Ticket，并且绑定守护者Pod

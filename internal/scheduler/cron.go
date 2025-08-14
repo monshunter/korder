@@ -23,6 +23,18 @@ import (
 	"time"
 )
 
+// Schedule represents a parsed cron schedule
+type Schedule struct {
+	schedule string
+}
+
+// Next returns the next time after the given time that matches the schedule
+func (s *Schedule) Next(after time.Time) time.Time {
+	// This is a simplified implementation that just adds 1 minute
+	// In a real implementation, this would calculate based on the cron expression
+	return after.Add(time.Minute)
+}
+
 // CronScheduler provides basic cron scheduling functionality
 type CronScheduler struct{}
 
@@ -73,6 +85,14 @@ func (c *CronScheduler) IsTimeToRun(schedule string) (bool, error) {
 	}
 
 	return true, nil
+}
+
+// ParseSchedule parses a cron schedule and returns a Schedule object
+func (c *CronScheduler) ParseSchedule(schedule string) (*Schedule, error) {
+	if err := c.ValidateSchedule(schedule); err != nil {
+		return nil, err
+	}
+	return &Schedule{schedule: schedule}, nil
 }
 
 // NextRunTime calculates the next time the schedule should run

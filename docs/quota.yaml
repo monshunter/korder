@@ -37,9 +37,12 @@ spec:
         reserved.memory: "40Gi"
     # 时间窗口配额（这是K8s ResourceQuota做不到的）
   timeWindows:
-    - name: "business-hours"
-      schedule: "0 9-17 * * 1-5"  # 工作时间
-      multiplier: 2.0             # 工作时间可以用2倍配额
-    - name: "off-hours"
-      schedule: "0 18-8 * * *"    # 非工作时间
-      multiplier: 0.5             # 非工作时间只能用一半配额
+    - name: "peak-hours"
+      # 使用更简单的格式
+      weekdays: [Mon, Tue, Wed, Thu, Fri]
+      hours: "09:00-17:00"
+      multiplier: 2.0 # 双倍
+    
+    - name: "weekends"
+      weekdays: [Sat, Sun]
+      multiplier: 0.5 # 一半

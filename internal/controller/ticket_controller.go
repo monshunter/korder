@@ -98,8 +98,8 @@ func (r *TicketReconciler) Reconcile(ctx context.Context, req ctrl.Request) (ctr
 	switch ticket.Status.Phase {
 	case corev1alpha1.TicketPending, "": // Empty phase means new ticket
 		return r.handlePendingTicket(ctx, ticket)
-	case corev1alpha1.TicketReserved:
-		return r.handleReservedTicket(ctx, ticket)
+	case corev1alpha1.TicketReady:
+		return r.handleReadyTicket(ctx, ticket)
 	case corev1alpha1.TicketClaimed:
 		return r.handleClaimedTicket(ctx, ticket)
 	case corev1alpha1.TicketExpired:
@@ -147,9 +147,14 @@ func (r *TicketReconciler) handlePendingTicket(ctx context.Context, ticket *core
 		ticket.Status.ActivationTime = &now
 	}
 
-	// Calculate expiration time
-	if ticket.Status.ExpirationTime == nil && ticket.Spec.Duration != nil {
-		expirationTime := metav1.NewTime(ticket.Status.ActivationTime.Add(ticket.Spec.Duration.Duration))
+	// Calculate expiration time from window spec
+	if ticket.Status.ExpirationTime == nil && ticket.Spec.Window != nil && ticket.Spec.Window.Duration != "" {
+		duration, err := time.ParseDuration(ticket.Spec.Window.Duration)
+		if err != nil {
+			log.Error(err, "Failed to parse window duration", "duration", ticket.Spec.Window.Duration)
+			return r.updateTicketStatus(ctx, ticket, corev1alpha1.TicketPending, "Failed", fmt.Sprintf("Invalid window duration: %v", err))
+		}
+		expirationTime := metav1.NewTime(ticket.Status.ActivationTime.Add(duration))
 		ticket.Status.ExpirationTime = &expirationTime
 	}
 
@@ -157,24 +162,24 @@ func (r *TicketReconciler) handlePendingTicket(ctx context.Context, ticket *core
 	pod, err := r.createGuardianPod(ctx, ticket)
 	if err != nil {
 		if apierrors.IsAlreadyExists(err) {
-			return r.handleReservedTicket(ctx, ticket)
+			return r.handleReadyTicket(ctx, ticket)
 		}
 		log.Error(err, "Failed to create guardian pod")
 		return r.updateTicketStatus(ctx, ticket, corev1alpha1.TicketPending, "Failed", fmt.Sprintf("Failed to create guardian pod: %v", err))
 	}
 
 	// Update ticket status
-	ticket.Status.Phase = corev1alpha1.TicketReserved
+	ticket.Status.Phase = corev1alpha1.TicketReady
 	guardianPodName := fmt.Sprintf("%s/%s", pod.Namespace, pod.Name)
 	ticket.Status.GuardianPod = &guardianPodName
 	ticket.Status.NodeName = &pod.Spec.NodeName
 
 	log.Info("Ticket activated", "ticket", ticket.Name, "pod", pod.Name)
-	return r.updateTicketStatus(ctx, ticket, corev1alpha1.TicketReserved, "Activated", "Guardian pod created and ticket reserved")
+	return r.updateTicketStatus(ctx, ticket, corev1alpha1.TicketReady, "Activated", "Guardian pod created and ticket ready")
 }
 
-// handleReservedTicket manages a reserved ticket
-func (r *TicketReconciler) handleReservedTicket(ctx context.Context, ticket *corev1alpha1.Ticket) (ctrl.Result, error) {
+// handleReadyTicket manages a ready ticket
+func (r *TicketReconciler) handleReadyTicket(ctx context.Context, ticket *corev1alpha1.Ticket) (ctrl.Result, error) {
 	log := logf.FromContext(ctx)
 
 	// Check if guardian pod still exists and is running
@@ -207,7 +212,7 @@ func (r *TicketReconciler) handleReservedTicket(ctx context.Context, ticket *cor
 
 		// Check if pod is running
 		if pod.Status.Phase == corev1.PodRunning {
-			return r.updateTicketStatus(ctx, ticket, corev1alpha1.TicketReserved, "Ready", "Guardian pod is running and ticket is ready")
+			return r.updateTicketStatus(ctx, ticket, corev1alpha1.TicketReady, "Ready", "Guardian pod is running and ticket is ready")
 		}
 	}
 
@@ -392,7 +397,7 @@ func (r *TicketReconciler) updateTicketStatus(ctx context.Context, ticket *corev
 
 	// Update conditions
 	now := metav1.Now()
-	conditionType := corev1alpha1.TicketReady
+	conditionType := corev1alpha1.TicketReadyCondition
 	conditionStatus := corev1.ConditionTrue
 
 	switch phase {

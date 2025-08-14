@@ -35,6 +35,8 @@ rules:
 - apiGroups:
   - core.korder.dev
   resources:
+  - cronorders
+  - daemonorders
   - orders
   - quotas
   - tickets
@@ -49,6 +51,8 @@ rules:
 - apiGroups:
   - core.korder.dev
   resources:
+  - cronorders/finalizers
+  - daemonorders/finalizers
   - orders/finalizers
   - quotas/finalizers
   - tickets/finalizers
@@ -57,6 +61,8 @@ rules:
 - apiGroups:
   - core.korder.dev
   resources:
+  - cronorders/status
+  - daemonorders/status
   - orders/status
   - quotas/status
   - tickets/status

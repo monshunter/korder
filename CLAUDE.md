@@ -24,9 +24,13 @@ korder is a declarative Kubernetes order system that guarantees resource allocat
 
 ### Individual Testing
 - `go test ./internal/controller -run TestOrder` - Run specific Order controller tests
+- `go test ./internal/controller -run TestCronOrder` - Run CronOrder controller tests
+- `go test ./internal/controller -run TestDaemonOrder` - Run DaemonOrder controller tests
 - `go test ./internal/controller -run TestTicket` - Run specific Ticket controller tests
 - `go test ./internal/webhook/v1 -run TestPodWebhook` - Run Pod webhook tests
 - `go test ./internal/webhook/v1alpha1 -run TestOrderWebhook` - Run Order webhook tests
+- `go test ./internal/webhook/v1alpha1 -run TestCronOrderWebhook` - Run CronOrder webhook tests
+- `go test ./internal/webhook/v1alpha1 -run TestDaemonOrderWebhook` - Run DaemonOrder webhook tests
 
 ### Docker Operations  
 - `make docker-build` - Build container image (default: controller:latest)
@@ -48,23 +52,37 @@ korder is a declarative Kubernetes order system that guarantees resource allocat
 
 ### Core Components
 - **Order Controller** (`internal/controller/order_controller.go`) - Manages Order lifecycle and creates Tickets
+- **CronOrder Controller** (`internal/controller/cronorder_controller.go`) - Manages scheduled Order creation via cron expressions
+- **DaemonOrder Controller** (`internal/controller/daemonorder_controller.go`) - Manages node-level resource reservations with one ticket per eligible node
 - **Ticket Controller** (`internal/controller/ticket_controller.go`) - Manages Ticket lifecycle and guardian pods
 - **Quota Controller** (`internal/controller/quota_controller.go`) - Manages resource quotas and enforces limits across Orders and Tickets
 - **Pod Webhook** (`internal/webhook/v1/pod_webhook.go`) - Intercepts pod creation to bind to tickets
-- **Order/Ticket/Quota Webhooks** (`internal/webhook/v1alpha1/`) - Validation and defaulting for custom resources
+- **Order/Ticket/Quota/CronOrder/DaemonOrder Webhooks** (`internal/webhook/v1alpha1/`) - Validation and defaulting for custom resources
 
 ### API Types
-- **Order** (`api/v1alpha1/order_types.go`) - Declares resource requirements and manages ticket lifecycle
-- **Ticket** (`api/v1alpha1/ticket_types.go`) - Represents individual resource reservations with guardian pods
+- **Order** (`api/v1alpha1/order_types.go`) - Declares resource requirements and manages ticket lifecycle using simplified declarative approach
+- **CronOrder** (`api/v1alpha1/cronorder_types.go`) - Scheduled Order creation using cron expressions with concurrency control
+- **DaemonOrder** (`api/v1alpha1/daemonorder_types.go`) - Node-level resource reservations, automatically creates one ticket per eligible node
+- **Ticket** (`api/v1alpha1/ticket_types.go`) - Represents individual resource reservations with guardian pods and window-based scheduling
 - **Quota** (`api/v1alpha1/quota_types.go`) - Defines resource quotas and limits for Orders and Tickets across different scopes
 
 ### System Design
-The system implements a resource reservation pattern where:
-1. Orders define resource requirements and quantities
-2. Tickets are created for each resource reservation with guardian pods to hold the resources
-3. Business pods are scheduled to claimed tickets through webhook intervention
-4. Guardian pods are terminated when tickets are claimed or expired
-5. Quotas enforce resource limits and policies across Orders and Tickets at various scopes (cluster, namespace, or object-level)
+The system implements a resource reservation pattern with multiple order types:
+
+#### Core Workflow
+1. **Orders** define resource requirements with simplified declarative approach (no complex strategies)
+2. **CronOrders** schedule Order creation using cron expressions with concurrency control
+3. **DaemonOrders** automatically create one ticket per eligible node for infrastructure services
+4. **Tickets** are created for each resource reservation with guardian pods to hold the resources
+5. **Business pods** are scheduled to claimed tickets through webhook intervention
+6. **Guardian pods** are terminated when tickets are claimed or expired
+7. **Quotas** enforce resource limits and policies across Orders and Tickets at various scopes
+
+#### Key Architectural Changes
+- **Simplified Order Types**: Removed complex strategy patterns in favor of dedicated CronOrder and DaemonOrder resources
+- **Window-based Scheduling**: Tickets now use WindowSpec for time-based validity with timezone support
+- **Phase Transitions**: Ticket phases changed from "Reserved" to "Ready" for clarity
+- **Embedded Metadata**: CRDs now support embedded object metadata generation
 
 ### Configuration Structure
 - `config/crd/` - Custom Resource Definitions
@@ -280,12 +298,43 @@ Located in `test/e2e/`. Requires Kind cluster and tests full system integration.
 ### Test Environment Setup
 The project uses envtest for controller testing with automatic Kubernetes API server setup.
 
+## Order Type Evolution
+
+### Simplified Order Architecture
+The project has evolved from complex strategy-based Orders to a cleaner separation of concerns:
+
+#### Order (Simplified)
+- Removed `StrategyType` and `OrderStrategy` complexity
+- Direct specification of `replicas`, `refreshPolicy`, and `minReadySeconds`
+- Uses `WindowSpec` for time-based scheduling with timezone support
+
+#### CronOrder (New)
+- Dedicated resource for scheduled Order creation
+- Cron-based scheduling with concurrency control (`Allow`, `Forbid`, `Replace`)
+- History management for successful and failed runs
+- Timezone support and starting deadline configuration
+
+#### DaemonOrder (New)  
+- Specialized for node-level resource reservations
+- Automatically creates one ticket per eligible node
+- DaemonSet-like behavior for infrastructure services
+- Node selection and status tracking similar to Kubernetes DaemonSet
+
+### Migration from Legacy Patterns
+- **Before**: `Order.spec.strategy.type: "Scheduled"` with complex strategy configurations
+- **After**: Dedicated `CronOrder` resource with cleaner scheduling semantics
+- **Before**: `Order.spec.daemonSet: true` flag within Order
+- **After**: Dedicated `DaemonOrder` resource with specialized node management
+
 ## Key Files
 - `cmd/main.go` - Main controller entry point with webhook and metrics server setup
 - `PROJECT` - Kubebuilder project configuration
 - `Dockerfile` - Container build configuration
 - `docs/requirements.md` - Chinese language system requirements and design (contains architectural details)
+- `docs/order.yaml` - Order configuration examples
+- `docs/cronOrder.yaml` - CronOrder configuration examples
+- `docs/daemonOrder.yaml` - DaemonOrder configuration examples  
 - `docs/quota.yaml` - Comprehensive Quota configuration example with advanced features
-- `config/samples/core_v1alpha1_quota.yaml` - Basic Quota sample configuration
-- `config/rbac/quota_*_role.yaml` - RBAC roles for Quota management (admin, editor, viewer)
-- `config/crd/bases/core.korder.dev_quotas.yaml` - Quota Custom Resource Definition
+- `config/samples/core_v1alpha1_*.yaml` - Sample configurations for all resource types
+- `config/rbac/*_*_role.yaml` - RBAC roles for all resource types (admin, editor, viewer)
+- `config/crd/bases/core.korder.dev_*.yaml` - All Custom Resource Definitions

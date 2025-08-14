@@ -93,12 +93,11 @@ var _ = Describe("Basic Workflow Integration Test", func() {
 				},
 				Spec: corev1alpha1.OrderSpec{
 					Replicas: func() *int32 { i := int32(2); return &i }(),
-					Strategy: corev1alpha1.OrderStrategy{
-						Type: corev1alpha1.OneTimeStrategy,
-					},
 					Template: corev1alpha1.TicketTemplate{
 						Spec: corev1alpha1.TicketTemplateSpec{
-							Duration: &metav1.Duration{Duration: time.Hour * 24},
+							Window: &corev1alpha1.WindowSpec{
+								Duration: "24h",
+							},
 							Resources: &corev1.ResourceRequirements{
 								Requests: corev1.ResourceList{
 									corev1.ResourceCPU:    resource.MustParse("500m"),
@@ -213,12 +212,11 @@ var _ = Describe("Basic Workflow Integration Test", func() {
 				},
 				Spec: corev1alpha1.OrderSpec{
 					Replicas: func() *int32 { i := int32(1); return &i }(),
-					Strategy: corev1alpha1.OrderStrategy{
-						Type: corev1alpha1.OneTimeStrategy,
-					},
 					Template: corev1alpha1.TicketTemplate{
 						Spec: corev1alpha1.TicketTemplateSpec{
-							Duration: &metav1.Duration{Duration: time.Hour},
+							Window: &corev1alpha1.WindowSpec{
+								Duration: "1h",
+							},
 							Resources: &corev1.ResourceRequirements{
 								Requests: corev1.ResourceList{
 									corev1.ResourceCPU: resource.MustParse("100m"),
@@ -238,12 +236,11 @@ var _ = Describe("Basic Workflow Integration Test", func() {
 				},
 				Spec: corev1alpha1.OrderSpec{
 					Replicas: func() *int32 { i := int32(1); return &i }(),
-					Strategy: corev1alpha1.OrderStrategy{
-						Type: corev1alpha1.OneTimeStrategy,
-					},
 					Template: corev1alpha1.TicketTemplate{
 						Spec: corev1alpha1.TicketTemplateSpec{
-							Duration: &metav1.Duration{Duration: time.Hour},
+							Window: &corev1alpha1.WindowSpec{
+								Duration: "1h",
+							},
 							Resources: &corev1.ResourceRequirements{
 								Requests: corev1.ResourceList{
 									corev1.ResourceCPU: resource.MustParse("100m"),

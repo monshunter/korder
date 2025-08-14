@@ -4,20 +4,45 @@ kind: CustomResourceDefinition
 metadata:
   annotations:
     controller-gen.kubebuilder.io/version: v0.18.0
-  name: orders.core.korder.dev
+  name: daemonorders.core.korder.dev
 spec:
   group: core.korder.dev
   names:
-    kind: Order
-    listKind: OrderList
-    plural: orders
-    singular: order
+    kind: DaemonOrder
+    listKind: DaemonOrderList
+    plural: daemonorders
+    singular: daemonorder
   scope: Namespaced
   versions:
-  - name: v1alpha1
+  - additionalPrinterColumns:
+    - description: Number of nodes that should be running tickets
+      jsonPath: .status.desiredNumberScheduled
+      name: Desired
+      type: integer
+    - description: Number of nodes that are running tickets
+      jsonPath: .status.currentNumberScheduled
+      name: Current
+      type: integer
+    - description: Number of nodes with ready tickets
+      jsonPath: .status.numberReady
+      name: Ready
+      type: integer
+    - description: Number of nodes with updated tickets
+      jsonPath: .status.updatedNumberScheduled
+      name: Up-to-date
+      type: integer
+    - description: Number of nodes with available tickets
+      jsonPath: .status.numberAvailable
+      name: Available
+      type: integer
+    - description: Age of the daemon order
+      jsonPath: .metadata.creationTimestamp
+      name: Age
+      type: date
+    name: v1alpha1
     schema:
       openAPIV3Schema:
-        description: Order is the Schema for the orders API
+        description: DaemonOrder is the Schema for the daemonorders API
         properties:
           apiVersion:
             description: |-
@@ -37,18 +62,10 @@ spec:
           metadata:
             type: object
           spec:
-            description: spec defines the desired state of Order
+            description: spec defines the desired state of DaemonOrder
             properties:
-              minReadySeconds:
-                default: 0
-                description: |-
-                  MinReadySeconds is the minimum number of seconds for which a newly created ticket should
-                  be ready without any of its containers crashing, for it to be considered available
-                format: int32
-                minimum: 0
-                type: integer
               paused:
-                description: Paused indicates that the order is paused
+                description: Paused indicates that the daemon order is paused
                 type: boolean
               refreshPolicy:
                 default: OnClaim
@@ -58,14 +75,8 @@ spec:
                 - OnClaim
                 - Never
                 type: string
-              replicas:
-                default: 1
-                description: Replicas defines the number of tickets to create
-                format: int32
-                minimum: 0
-                type: integer
               selector:
-                description: Selector for tickets created by this order
+                description: Selector for tickets created by this daemon order
                 properties:
                   matchExpressions:
                     description: matchExpressions is a list of label selector requirements.
@@ -1388,23 +1399,19 @@ spec:
             - template
             type: object
           status:
-            description: status defines the observed state of Order
+            description: status defines the observed state of DaemonOrder
             properties:
-              availableReplicas:
-                description: AvailableReplicas is the number of available tickets
-                format: int32
-                type: integer
               collisionCount:
                 description: CollisionCount is the count of hash collisions for the
-                  Order
+                  DaemonOrder
                 format: int32
                 type: integer
               conditions:
                 description: Conditions represent the latest available observations
-                  of the order's current state
+                  of the daemon order's current state
                 items:
-                  description: OrderCondition describes the state of an order at a
-                    certain point
+                  description: DaemonOrderCondition describes the state of a daemon
+                    order at a certain point
                   properties:
                     lastTransitionTime:
                       description: Last time the condition transitioned
@@ -1420,32 +1427,51 @@ spec:
                       description: Status of the condition
                       type: string
                     type:
-                      description: Type of order condition
+                      description: Type of daemon order condition
                       type: string
                   required:
                   - status
                   - type
                   type: object
                 type: array
+              currentNumberScheduled:
+                description: CurrentNumberScheduled is the number of nodes that are
+                  running at least 1 ticket
+                format: int32
+                type: integer
+              desiredNumberScheduled:
+                description: DesiredNumberScheduled is the total number of nodes that
+                  should be running tickets
+                format: int32
+                type: integer
+              numberAvailable:
+                description: NumberAvailable is the number of nodes that should be
+                  running tickets and have available tickets
+                format: int32
+                type: integer
+              numberMisscheduled:
+                description: NumberMisscheduled is the number of nodes that are running
+                  tickets but are not supposed to
+                format: int32
+                type: integer
+              numberReady:
+                description: NumberReady is the number of nodes that should be running
+                  tickets and have one or more ready tickets
+                format: int32
+                type: integer
+              numberUnavailable:
+                description: NumberUnavailable is the number of nodes that should
+                  be running tickets but have unavailable tickets
+                format: int32
+                type: integer
               observedGeneration:
                 description: ObservedGeneration reflects the generation of the most
-                  recently observed Order
+                  recently observed DaemonOrder
                 format: int64
                 type: integer
-              replicas:
-                description: Replicas is the number of desired tickets
-                format: int32
-                type: integer
-              terminalReplicas:
-                description: TerminalReplicas is the number of terminal tickets
-                format: int32
-                type: integer
-              unavailableReplicas:
-                description: UnavailableReplicas is the number of unavailable tickets
-                format: int32
-                type: integer
-              updatedReplicas:
-                description: UpdatedReplicas is the number of updated tickets
+              updatedNumberScheduled:
+                description: UpdatedNumberScheduled is the total number of nodes that
+                  are running updated tickets
                 format: int32
                 type: integer
             type: object
