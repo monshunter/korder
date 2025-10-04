@@ -48,6 +48,10 @@ korder is a declarative Kubernetes order system that guarantees resource allocat
 - `make setup-test-e2e` - Create Kind cluster for e2e tests
 - `make cleanup-test-e2e` - Delete Kind test cluster
 
+### Quick Deployment Scripts
+- `./up.sh` - Quick deployment (builds image, loads to ohmykube, installs CRDs, deploys controller)
+- `./down.sh` - Quick cleanup (undeploys controller, uninstalls CRDs)
+
 ## Architecture
 
 ### Core Components

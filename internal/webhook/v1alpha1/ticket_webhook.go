@@ -82,11 +82,27 @@ func (d *TicketCustomDefaulter) Default(ctx context.Context, obj runtime.Object)
 
 	// Set default window duration if not specified
 	if ticket.Spec.Window == nil {
+		currentTime := time.Now().Format(time.RFC3339)
+		defaultTimeZone := "UTC"
 		ticket.Spec.Window = &corev1alpha1.WindowSpec{
-			Duration: "24h", // 24 hours default
+			StartTime: &currentTime,     // Current time
+			Duration:  "2h",             // 2 hours default
+			TimeZone:  &defaultTimeZone, // Default to UTC
 		}
-	} else if ticket.Spec.Window.Duration == "" {
-		ticket.Spec.Window.Duration = "24h"
+	}
+
+	if ticket.Spec.Window.Duration == "" {
+		ticket.Spec.Window.Duration = "2h"
+	}
+
+	if ticket.Spec.Window.StartTime == nil {
+		currentTime := time.Now().Format(time.RFC3339)
+		ticket.Spec.Window.StartTime = &currentTime
+	}
+
+	if ticket.Spec.Window.TimeZone == nil {
+		defaultTimeZone := "UTC"
+		ticket.Spec.Window.TimeZone = &defaultTimeZone
 	}
 
 	// Set default scheduler name

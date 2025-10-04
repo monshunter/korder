@@ -8,6 +8,7 @@ metadata:
     env: "dev"
   annotations:
     korder.dev/order: "order-sample"
+    korder.dev/ticket-group: "backend-services"
 spec:
   lifecycle:
     ttlSecondsAfterFinished: 3600 # 完成后保留时间
@@ -92,10 +93,10 @@ metadata:
     korder.dev/ticket-request: "name:ticket-sample"
     # or use a label selector to find a ticket
     # korder.dev/ticket-request: "selector: app=app-name,env=dev"
-    # or use a group name to find a ticket
-    # korder.dev/ticket-request: "group:order-sample"
+    # or use a group name to find tickets with matching korder.dev/ticket-group annotation
+    # korder.dev/ticket-request: "group:backend-services"
 
-    # Pod 通过以下 annotation 声明已经使用某个ticket
+    # Pod 通过以下 annotation 声明已经使用某个ticket, 由webhook自动注入
     korder.dev/ticket-claimed: "ticket-sample"
     
 spec:

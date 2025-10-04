@@ -9,7 +9,5 @@ webhooks:
   - name: "korder-pod-filter"
     expression: |
       has(object.metadata.annotations) && (
-        'korder.dev/ticket-request' in object.metadata.annotations ||
-        'korder.dev/order-request' in object.metadata.annotations ||
-        'korder.dev/ticket-claimed' in object.metadata.annotations
+        'korder.dev/ticket-request' in object.metadata.annotations
       )
